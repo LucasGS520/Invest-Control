@@ -28,7 +28,7 @@ async function handleRegister() {
     params.append('password', password.value)
     const { data } = await axios.post('/api/auth/login', params)
     auth.setToken(data.access_token)
-    router.push('/aporte')
+    router.push('/dashboard')
   } catch (err: unknown) {
     const axiosError = err as { response?: { data?: { detail?: string } } }
     error.value = axiosError.response?.data?.detail || 'Erro ao criar conta.'

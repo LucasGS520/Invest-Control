@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.api.routes.alerts import router as alerts_router
 from app.api.routes.aporte import router as aporte_router
+from app.api.routes.reports import router as reports_router
 from app.api.routes.assets import router as assets_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.calendar import router as calendar_router
@@ -27,7 +28,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.5.0",
+    version="0.6.0",
     debug=settings.app_debug,
     lifespan=lifespan,
     description=(
@@ -47,6 +48,7 @@ app.include_router(market_router, prefix="/api")
 app.include_router(aporte_router, prefix="/api")
 app.include_router(calendar_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
+app.include_router(reports_router, prefix="/api")
 
 
 @app.get("/", tags=["Root"], summary="Resumo da API")
@@ -54,7 +56,7 @@ def read_root() -> dict[str, str]:
     """Expõe uma mensagem curta para identificar o serviço em execução."""
     return {
         "name": settings.app_name,
-        "version": "0.5.0",
+        "version": "0.6.0",
         "environment": settings.app_env,
         "docs": "/docs",
         "health": "/api/health",

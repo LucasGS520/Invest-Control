@@ -20,6 +20,9 @@ function logout() {
       </div>
       <ul class="nav-list">
         <li>
+          <router-link to="/dashboard" active-class="active">Dashboard</router-link>
+        </li>
+        <li>
           <router-link to="/aporte" active-class="active">Aporte Sob Demanda</router-link>
         </li>
         <li>
@@ -30,6 +33,9 @@ function logout() {
         </li>
         <li>
           <router-link to="/alertas" active-class="active">Alertas</router-link>
+        </li>
+        <li>
+          <router-link to="/relatorios" active-class="active">Relatórios</router-link>
         </li>
       </ul>
       <button class="logout-btn" @click="logout">Sair</button>
