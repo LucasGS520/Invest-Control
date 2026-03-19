@@ -17,6 +17,7 @@ from sqlalchemy import select
 from app.db.models.asset import Asset
 from app.db.session import AsyncSessionLocal
 from app.services import market_data_service as mds
+from app.services.alert_service import evaluate_all_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,17 @@ async def _sync_all_dividends() -> None:
                 logger.warning("[scheduler] Falha ao sincronizar dividendos de %s: %s", ticker, exc)
 
 
+async def _check_all_alerts() -> None:
+    """Avalia todos os alertas ativos e registra os disparados."""
+    async with AsyncSessionLocal() as db:
+        try:
+            fired = await evaluate_all_alerts(db)
+            if fired:
+                logger.info("[scheduler] Alertas disparados: %d", fired)
+        except Exception as exc:
+            logger.warning("[scheduler] Erro ao avaliar alertas: %s", exc)
+
+
 def start_scheduler() -> None:
     """Registra jobs e inicia o scheduler.
 
@@ -87,8 +99,17 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
+    # Alertas: a cada 30 minutos
+    scheduler.add_job(
+        _check_all_alerts,
+        trigger="interval",
+        minutes=30,
+        id="check_alerts",
+        replace_existing=True,
+    )
+
     scheduler.start()
-    logger.info("[scheduler] Iniciado — cotações a cada %d min, dividendos diariamente às 7h")
+    logger.info("[scheduler] Iniciado — cotações a cada %d min, dividendos às 7h, alertas a cada 30min")
 
 
 def stop_scheduler() -> None:

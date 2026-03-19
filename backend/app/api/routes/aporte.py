@@ -56,4 +56,7 @@ async def recommend(
         value=body.value,
         desired_dy=body.desired_dy,
         max_assets=body.max_assets,
+        asset_type_filter=body.asset_type_filter,
+        sector_filter=body.sector_filter,
+        only_below_ceiling=body.only_below_ceiling,
     )

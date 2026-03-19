@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.routes.alerts import router as alerts_router
 from app.api.routes.aporte import router as aporte_router
 from app.api.routes.assets import router as assets_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.calendar import router as calendar_router
 from app.api.routes.health import router as health_router
 from app.api.routes.market import router as market_router
 from app.api.routes.portfolios import router as portfolios_router
@@ -25,7 +27,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.4.0",
+    version="0.5.0",
     debug=settings.app_debug,
     lifespan=lifespan,
     description=(
@@ -43,6 +45,8 @@ app.include_router(transactions_router, prefix="/api")
 app.include_router(assets_router, prefix="/api")
 app.include_router(market_router, prefix="/api")
 app.include_router(aporte_router, prefix="/api")
+app.include_router(calendar_router, prefix="/api")
+app.include_router(alerts_router, prefix="/api")
 
 
 @app.get("/", tags=["Root"], summary="Resumo da API")
@@ -50,7 +54,7 @@ def read_root() -> dict[str, str]:
     """Expõe uma mensagem curta para identificar o serviço em execução."""
     return {
         "name": settings.app_name,
-        "version": "0.4.0",
+        "version": "0.5.0",
         "environment": settings.app_env,
         "docs": "/docs",
         "health": "/api/health",
