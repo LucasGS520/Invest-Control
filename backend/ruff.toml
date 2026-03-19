@@ -1,0 +1,12 @@
+# Configuração do Ruff para linting e formatação do backend InvestControl.
+
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+"alembic/*" = ["F401"]
+"tests/*" = ["S101"]
