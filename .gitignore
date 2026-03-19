@@ -1,0 +1,17 @@
+# Dependências Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Artefatos Node.js
+node_modules/
+dist/
+
+# Configurações locais
+.env
+.env.*
+
+# Arquivos do editor
+.vscode/
+.idea/
+.DS_Store
