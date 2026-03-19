@@ -6,7 +6,13 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/aporte',
+      redirect: '/dashboard',
+    },
+    {
+      path: '/dashboard',
+      name: 'dashboard',
+      component: () => import('@/views/DashboardView.vue'),
+      meta: { requiresAuth: true },
     },
     {
       path: '/login',
@@ -50,6 +56,12 @@ const router = createRouter({
       component: () => import('@/views/AlertsView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/relatorios',
+      name: 'relatorios',
+      component: () => import('@/views/ReportsView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 
@@ -60,7 +72,7 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.meta.public && auth.isAuthenticated) {
-    return { name: 'aporte' }
+    return { name: 'dashboard' }
   }
 })
 
