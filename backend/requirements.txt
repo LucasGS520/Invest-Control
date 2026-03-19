@@ -1,3 +1,30 @@
+# --- Web Framework ---
 fastapi==0.115.12
 uvicorn[standard]==0.34.0
+
+# --- Configuração ---
 pydantic-settings==2.8.1
+
+# --- Banco de Dados ---
+sqlalchemy==2.0.40
+alembic==1.15.1
+asyncpg==0.30.0
+greenlet==3.2.0
+
+# --- Segurança / Auth ---
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# --- HTTP Client (dados de mercado) ---
+httpx==0.28.1
+
+# --- Tarefas Periódicas ---
+apscheduler==3.11.0
+
+# --- Testes ---
+pytest==8.3.5
+pytest-asyncio==0.25.3
+pytest-cov==6.1.0
+
+# --- Qualidade de Código ---
+ruff==0.11.2

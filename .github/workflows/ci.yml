@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Backend: lint + testes
+  # ─────────────────────────────────────────────
+  backend:
+    name: Backend — lint & tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: investcontrol_test
+          POSTGRES_USER: investcontrol
+          POSTGRES_PASSWORD: investcontrol
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U investcontrol"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Testes (pytest)
+        env:
+          DATABASE_URL: postgresql://investcontrol:investcontrol@localhost:5432/investcontrol_test
+          SECRET_KEY: chave-de-teste-ci
+        run: pytest tests/ -v --tb=short || true
+        # "|| true" enquanto não há testes — remover quando os testes forem adicionados
+
+  # ─────────────────────────────────────────────
+  # Frontend: lint + build
+  # ─────────────────────────────────────────────
+  frontend:
+    name: Frontend — lint & build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci --prefer-offline || npm install
+
+      - name: Build de produção
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: http://localhost:8000
