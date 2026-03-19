@@ -204,14 +204,18 @@ async def recommend_aporte(
     value: Decimal,
     desired_dy: Decimal,
     max_assets: int,
+    asset_type_filter: str | None = None,
+    sector_filter: list[str] | None = None,
+    only_below_ceiling: bool = False,
 ) -> AporteRecommendationOut:
     """Gera recomendações ranqueadas para o aporte.
 
     1. Carrega posições da carteira com dados do ativo.
-    2. Para cada ativo, calcula os 4 fatores de score.
-    3. Ordena por score decrescente.
-    4. Calcula quantidade recomendada com base no valor disponível.
-    5. Retorna as top `max_assets` recomendações com justificativas.
+    2. Aplica filtros de personalização (FR6): tipo, setor, apenas abaixo do teto.
+    3. Para cada ativo filtrado, calcula os 4 fatores de score.
+    4. Ordena por score decrescente.
+    5. Calcula quantidade recomendada com base no valor disponível.
+    6. Retorna as top `max_assets` recomendações com justificativas.
     """
     # ── Carrega carteira com posições ─────────────────────────────────────
     result = await db.execute(
@@ -221,6 +225,24 @@ async def recommend_aporte(
     )
     loaded = result.scalar_one()
     positions = loaded.positions
+
+    if not positions:
+        return AporteRecommendationOut(
+            portfolio_id=portfolio.id,
+            available_value=value,
+            desired_dy=desired_dy,
+            recommendations=[],
+            remaining_value=value,
+        )
+
+    # ── Aplica filtros de personalização (FR6) ────────────────────────────
+    if asset_type_filter:
+        positions = [p for p in positions if p.asset.asset_type == asset_type_filter.upper()]
+    if sector_filter:
+        sectors_upper = [s.upper() for s in sector_filter]
+        positions = [
+            p for p in positions if p.asset.sector and p.asset.sector.upper() in sectors_upper
+        ]
 
     if not positions:
         return AporteRecommendationOut(
@@ -318,6 +340,10 @@ async def recommend_aporte(
         }
 
         candidates.append((score, pos, context))
+
+    # ── Filtro: apenas abaixo do teto (FR6) ──────────────────────────────
+    if only_below_ceiling:
+        candidates = [(s, p, ctx) for s, p, ctx in candidates if ctx["is_below_ceiling"]]
 
     # ── Ordena por score decrescente ──────────────────────────────────────
     candidates.sort(key=lambda x: x[0], reverse=True)

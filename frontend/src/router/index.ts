@@ -38,6 +38,18 @@ const router = createRouter({
       component: () => import('@/views/PortfolioDetailView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/calendario',
+      name: 'calendario',
+      component: () => import('@/views/CalendarView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/alertas',
+      name: 'alertas',
+      component: () => import('@/views/AlertsView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

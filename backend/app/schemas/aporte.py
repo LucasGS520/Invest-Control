@@ -19,6 +19,19 @@ class AporteRequest(BaseModel):
         le=20,
         description="Número máximo de ativos na lista de recomendações",
     )
+    # ── Filtros de personalização (FR6) ────────────────────────────────────
+    asset_type_filter: str | None = Field(
+        default=None,
+        description="Filtra por tipo de ativo: 'ACAO' ou 'FII'",
+    )
+    sector_filter: list[str] | None = Field(
+        default=None,
+        description="Filtra por setores específicos (ex: ['Logística', 'Shoppings'])",
+    )
+    only_below_ceiling: bool = Field(
+        default=False,
+        description="Se True, exclui ativos acima do preço-teto Barsi",
+    )
 
 
 class RecommendationItem(BaseModel):
