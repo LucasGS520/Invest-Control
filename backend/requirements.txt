@@ -4,6 +4,7 @@ uvicorn[standard]==0.34.0
 
 # --- Configuração ---
 pydantic-settings==2.8.1
+python-multipart==0.0.22
 
 # --- Banco de Dados ---
 sqlalchemy==2.0.40

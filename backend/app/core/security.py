@@ -7,14 +7,16 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt tem limite de 72 bytes. bcrypt_sha256 faz pré-hash e evita erro
+# para senhas longas sem perder compatibilidade com hashes legados bcrypt.
+_pwd_context = CryptContext(schemes=["bcrypt_sha256", "bcrypt"], deprecated="auto")
 
 
 # ---------- Senhas ----------
 
 
 def hash_password(plain: str) -> str:
-    """Retorna o hash bcrypt da senha fornecida."""
+    """Retorna o hash seguro da senha fornecida."""
     return _pwd_context.hash(plain)
 
 

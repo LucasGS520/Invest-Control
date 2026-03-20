@@ -68,3 +68,21 @@ async def test_get_me(client: AsyncClient):
 async def test_get_me_unauthorized(client: AsyncClient):
     resp = await client.get("/api/auth/me")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_register_and_login_with_long_password(client: AsyncClient):
+    long_password = "A" * 80 + "!x9"
+
+    reg = await client.post(
+        "/api/auth/register",
+        json={"name": "Long Pass", "email": "longpass@test.com", "password": long_password},
+    )
+    assert reg.status_code == 201
+
+    login = await client.post(
+        "/api/auth/login",
+        data={"username": "longpass@test.com", "password": long_password},
+    )
+    assert login.status_code == 200
+    assert "access_token" in login.json()
