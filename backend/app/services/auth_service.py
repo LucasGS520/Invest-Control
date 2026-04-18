@@ -21,10 +21,18 @@ async def create_user(db: AsyncSession, data: UserRegister) -> User:
             detail="E-mail já cadastrado.",
         )
 
+    try:
+        hashed = hash_password(data.password)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Senha muito longa; limite de 72 bytes (UTF-8).",
+        )
+
     user = User(
         name=data.name,
         email=data.email,
-        hashed_password=hash_password(data.password),
+        hashed_password=hashed,
     )
     db.add(user)
     await db.commit()

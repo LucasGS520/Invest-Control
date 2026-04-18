@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.alerts import router as alerts_router
 from app.api.routes.aporte import router as aporte_router
@@ -36,6 +37,15 @@ app = FastAPI(
         "Inclui autenticação JWT, gestão de carteiras, dados de mercado (brapi.dev), "
         "DY histórico e preço-teto Barsi."
     ),
+)
+
+# Configura CORS para permitir requisições do frontend em desenvolvimento.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Prefixo /api em todos os routers para facilitar versionamento futuro.

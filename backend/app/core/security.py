@@ -7,9 +7,10 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# bcrypt tem limite de 72 bytes. bcrypt_sha256 faz pré-hash e evita erro
-# para senhas longas sem perder compatibilidade com hashes legados bcrypt.
-_pwd_context = CryptContext(schemes=["bcrypt_sha256", "bcrypt"], deprecated="auto")
+# Não usamos o backend `bcrypt` para evitar dependência nativa/erros
+# em imagens onde a extensão `bcrypt` não está disponível.
+# `pbkdf2_sha256` é pura-Python, segura e não tem limite de 72 bytes.
+_pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 # ---------- Senhas ----------

@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Integração de dados de mercado (brapi.dev)
     brapi_token: str = ""
     market_data_cache_minutes: int = 15
+    # CORS: origens permitidas para o frontend (por padrão Vite dev)
+    allowed_origins: list[str] = ["http://localhost:5173"]
 
     model_config = SettingsConfigDict(
         env_file=".env",
