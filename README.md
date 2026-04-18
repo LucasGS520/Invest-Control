@@ -54,3 +54,30 @@ Após iniciar os serviços:
 ## Observações
 
 Esta entrega representa o **passo inicial** de construção do sistema, transformando o SRS em uma base executável e pronta para a próxima iteração.
+## Integração de dados de mercado
+
+O backend agora possui uma camada dedicada em `backend/app/integrations/market_data` para unificar cotações e proventos sem quebrar a API pública já usada pelo sistema.
+
+- Cotações: prioridade configurável entre `yfinance`, `twelvedata` e `brapi`.
+- Dividendos: prioridade configurável entre `statusinvest`, `fundamentus` e `brapi`.
+- Persistência: dados continuam sendo gravados em `market_quotes` e `dividends`.
+- Compatibilidade: `app/services/market_data_service.py` segue expondo as mesmas funções principais.
+- Scheduler: `update_quotes` tenta caminho em lote antes do fallback unitário.
+
+## Variáveis de ambiente de mercado
+
+Exemplos das variáveis novas estão em `backend/.env.example`.
+
+- `BRAPI_TOKEN`
+- `TWELVEDATA_API_KEY`
+- `TWELVEDATA_BASE_URL`
+- `PRICE_PROVIDERS_ORDER`
+- `DIVIDEND_PROVIDERS_ORDER`
+- `MARKET_DATA_CONCURRENCY`
+- `PROVIDER_TIMEOUTS_SECONDS`
+
+## Limitações e pontos abertos
+
+- `StatusInvest` e `Fundamentus` usam scraping HTML e podem exigir ajustes se a estrutura das páginas mudar.
+- O provider da `B3` foi deixado como stub documentado, pois pode depender de licenciamento e credenciais.
+- O cache principal segue baseado no banco relacional existente; cache distribuído permanece como melhoria futura.

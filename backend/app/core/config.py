@@ -1,5 +1,6 @@
 """Centraliza as configurações base da aplicação FastAPI."""
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +25,25 @@ class Settings(BaseSettings):
     # Integração de dados de mercado (brapi.dev)
     brapi_token: str = ""
     market_data_cache_minutes: int = 15
+    price_providers_order: list[str] = Field(
+        default_factory=lambda: ["yfinance", "twelvedata", "brapi"]
+    )
+    dividend_providers_order: list[str] = Field(
+        default_factory=lambda: ["statusinvest", "fundamentus", "brapi"]
+    )
+    twelvedata_api_key: str = ""
+    twelvedata_base_url: str = "https://api.twelvedata.com"
+    market_data_concurrency: int = 5
+    provider_timeouts_seconds: dict[str, float] = Field(
+        default_factory=lambda: {
+            "default": 10.0,
+            "yfinance": 15.0,
+            "twelvedata": 10.0,
+            "statusinvest": 10.0,
+            "fundamentus": 10.0,
+            "b3": 20.0,
+        }
+    )
     # CORS: origens permitidas para o frontend (por padrão Vite dev)
     allowed_origins: list[str] = ["http://localhost:5173"]
 

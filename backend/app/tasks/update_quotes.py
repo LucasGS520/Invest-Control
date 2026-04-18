@@ -36,6 +36,12 @@ async def _update_all_quotes() -> None:
     logger.info("[scheduler] Atualizando cotações de %d ativos — %s", len(tickers), datetime.now(UTC))
 
     async with AsyncSessionLocal() as db:
+        try:
+            await mds.get_quotes(db, tickers)
+            return
+        except Exception as exc:
+            logger.warning("[scheduler] Falha no batch de cotações, usando fallback unitário: %s", exc)
+
         for ticker in tickers:
             try:
                 await mds.get_quote(db, ticker)

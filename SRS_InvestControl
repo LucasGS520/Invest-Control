@@ -22,8 +22,6 @@ A ênfase estratégica está em um backend robusto que viabilize recomendações
 2. Gestão de Carteira/Ativos/Transações : Incluindo métricas básicas (preço médio, rentabilidade).
 3. Integração de Dados : Cotações, dividendos/proventos, histórico; cache e atualizações.
 4. Funcionalidades Complementares Essenciais : DY (atual/histórico), preço-teto (Barsi), oportunidades, calendário de proventos, recomendações personalizadas, acompanhamento de performance, alertas inteligentes.
-5. Autenticação/Autorização e Preferências do Usuário.
-6. API REST com documentação.
 
 ### Fora do Escopo (Não Faz):
 
@@ -40,12 +38,7 @@ A ênfase estratégica está em um backend robusto que viabilize recomendações
 **DY (Dividend Yield)** : Dividendos/Preço, anualizado.
 **Preço-teto (Barsi)** : Preço máximo aceitável calculado via dividendo médio / DY desejado.
 **Data com/ex** : Marcos operacionais para direito a proventos.
-**SRS** : Software Requirements Specification (Especificação de Requisitos de Software).
-**JWT** : JSON Web Token.
-**RBAC** : Role-Based Access Control.
-**LGPD** : Lei Geral de Proteção de Dados.
 **CRUD** : Create, Read, Update, Delete.
-**API** : Application Programming Interface.
 **P** : Percentil  (indica que % das requisições devem ser processadas dentro de um determinado tempo).
 
 ---
@@ -234,3 +227,17 @@ As seguintes métricas serão utilizadas para avaliar o sucesso do projeto e a a
 - Engajamento : ≥ % dos usuários ativos configuram ao menos alerta/semana.
 - Confiabilidade : Uptime mensal ≥ ,%; taxa de falhas críticas de API < ,%.
 - Precisão operacional de datas de proventos : ≥ % de correspondência com fontes oficiais.
+### Nota de Implementação Atual - Fontes Externas de Mercado
+
+A implementação atual do backend adota uma camada de agregação de providers para dados de mercado, com prioridade configurável por tipo de dado.
+
+- Cotações: `yfinance`, `Twelve Data`, `brapi`.
+- Dividendos/proventos: `StatusInvest`, `Fundamentus`, `brapi`.
+- Dados estruturais B3: previsto, mas ainda dependente de licenciamento/credenciais; provider mantido como stub documentado.
+
+Restrições operacionais atuais:
+
+- Providers de scraping podem sofrer regressão quando houver mudança de HTML nas fontes.
+- Chaves externas devem ser fornecidas por variáveis de ambiente.
+- O cache operacional continua nas tabelas locais `market_quotes` e `dividends`.
+- Redis/cache distribuído permanece fora do escopo atual.

@@ -15,3 +15,7 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# Documentos Auxiliares Dev
+.auxiliares_docs/
+.auxiliares_docs
