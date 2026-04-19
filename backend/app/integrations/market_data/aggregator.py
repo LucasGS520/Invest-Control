@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.models.dividend import Dividend
 from app.db.models.market_data import MarketQuote
-from app.integrations.market_data.base import AssetInfo, BaseAssetInfoProvider, BaseDividendProvider, BasePriceProvider, DividendItem, Quote
+from app.integrations.market_data.base import AssetInfo, BaseAssetInfoProvider, BaseDividendProvider, BasePriceProvider, DividendItem, PermanentError, Quote, TransientError
+from app.integrations.market_data.metrics import market_metrics
+from app.integrations.market_data.ticker_resolver import resolve_for_provider, to_canonical
 from app.integrations.market_data.providers import (
     BrapiProvider,
     FundamentusProvider,
@@ -44,11 +49,22 @@ class _CircuitBreaker:
         count = self._failures.get(name, 0) + 1
         self._failures[name] = count
         if count >= self._threshold:
-            self._open_until[name] = datetime.now(timezone.utc) + timedelta(seconds=self._reset_seconds)
+            until = datetime.now(timezone.utc) + timedelta(seconds=self._reset_seconds)
+            self._open_until[name] = until
+            market_metrics.record_circuit_breaker_open(name)
+            logger.warning(
+                "circuit_breaker_open provider=%s failures=%d reset_at=%s",
+                name, count, until.isoformat(),
+            )
+        else:
+            logger.debug("circuit_breaker_failure provider=%s failures=%d threshold=%d", name, count, self._threshold)
 
     def record_success(self, name: str) -> None:
+        was_open = name in self._open_until
         self._failures[name] = 0
         self._open_until.pop(name, None)
+        if was_open:
+            logger.info("circuit_breaker_closed provider=%s", name)
 
 
 class MarketDataAggregator:
@@ -64,16 +80,20 @@ class MarketDataAggregator:
         )
 
     async def get_quote(self, db: AsyncSession, ticker: str) -> MarketQuote:
-        ticker = ticker.upper()
+        ticker = to_canonical(ticker)
         cached = await self._get_cached_quote(db, ticker)
         if cached is not None:
+            market_metrics.record_cache_hit()
+            logger.debug("cache_hit ticker=%s source=%s", ticker, cached.source)
             return cached
 
+        market_metrics.record_cache_miss()
+        logger.debug("cache_miss ticker=%s", ticker)
         quote = await self._fetch_quote_with_fallback(ticker)
         return await self._persist_quote(db, quote)
 
     async def get_quotes(self, db: AsyncSession, tickers: list[str]) -> dict[str, MarketQuote]:
-        normalized = list(dict.fromkeys(ticker.upper() for ticker in tickers if ticker))
+        normalized = list(dict.fromkeys(to_canonical(ticker) for ticker in tickers if ticker))
         if not normalized:
             return {}
 
@@ -100,7 +120,7 @@ class MarketDataAggregator:
 
     async def get_asset_info(self, ticker: str) -> AssetInfo | None:
         """Busca metadados do ativo com fallback entre providers."""
-        ticker = ticker.upper()
+        ticker = to_canonical(ticker)
         for name, provider in self._price_providers.items():
             if not isinstance(provider, BaseAssetInfoProvider):
                 continue
@@ -116,7 +136,7 @@ class MarketDataAggregator:
         return None
 
     async def sync_dividends(self, db: AsyncSession, ticker: str) -> list[Dividend]:
-        ticker = ticker.upper()
+        ticker = to_canonical(ticker)
         items = await self._fetch_dividends_with_fallback(ticker)
 
         existing_result = await db.execute(select(Dividend.ex_date).where(Dividend.ticker == ticker))
@@ -187,13 +207,21 @@ class MarketDataAggregator:
             settings.provider_timeouts_seconds.get("default", 10.0),
         )
 
+    @staticmethod
+    def _cache_ttl_minutes(ticker: str) -> int:
+        """Retorna TTL de cache em minutos baseado no tipo de ativo detectado pelo ticker."""
+        sla = settings.asset_type_sla_minutes
+        if ticker.endswith("11"):
+            return sla.get("FII", sla.get("ETF", settings.market_data_cache_minutes))
+        return sla.get("ACAO", settings.market_data_cache_minutes)
+
     async def _get_cached_quote(self, db: AsyncSession, ticker: str) -> MarketQuote | None:
         result = await db.execute(select(MarketQuote).where(MarketQuote.ticker == ticker))
         cached = result.scalar_one_or_none()
         if cached is None:
             return None
 
-        cache_limit = datetime.now(timezone.utc) - timedelta(minutes=settings.market_data_cache_minutes)
+        cache_limit = datetime.now(timezone.utc) - timedelta(minutes=self._cache_ttl_minutes(ticker))
         updated = cached.updated_at
         if updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
@@ -201,30 +229,44 @@ class MarketDataAggregator:
 
     async def _get_cached_quotes(self, db: AsyncSession, tickers: list[str]) -> dict[str, MarketQuote]:
         result = await db.execute(select(MarketQuote).where(MarketQuote.ticker.in_(tickers)))
-        cache_limit = datetime.now(timezone.utc) - timedelta(minutes=settings.market_data_cache_minutes)
+        now = datetime.now(timezone.utc)
 
         cached_map: dict[str, MarketQuote] = {}
         for row in result.scalars().all():
             updated = row.updated_at
             if updated.tzinfo is None:
                 updated = updated.replace(tzinfo=timezone.utc)
+            cache_limit = now - timedelta(minutes=self._cache_ttl_minutes(row.ticker))
             if updated >= cache_limit:
                 cached_map[row.ticker] = row
         return cached_map
 
     async def _fetch_quote_with_fallback(self, ticker: str) -> Quote:
         last_error: Exception | None = None
+        attempt = 0
         for name, provider in self._price_providers.items():
             if self._circuit_breaker.is_open(name):
+                logger.debug("provider_skipped ticker=%s provider=%s reason=circuit_open", ticker, name)
                 continue
+            if attempt > 0:
+                market_metrics.record_fallback()
+            attempt += 1
+            provider_ticker = resolve_for_provider(ticker, name)
             try:
                 async with self._semaphore:
-                    result = await provider.get_quote(ticker)
+                    result = await provider.get_quote(provider_ticker)
                 self._circuit_breaker.record_success(name)
+                result = result.model_copy(update={"ticker": ticker})
+                logger.info("quote_fetched ticker=%s provider=%s price=%s", ticker, name, result.price)
                 return result
+            except PermanentError as exc:
+                last_error = exc
+                logger.info("provider_permanent_error ticker=%s provider=%s error=%s", ticker, name, exc)
             except Exception as exc:
                 last_error = exc
+                market_metrics.record_quote_error(name)
                 self._circuit_breaker.record_failure(name)
+                logger.warning("provider_error ticker=%s provider=%s error=%s", ticker, name, exc)
         raise ValueError(f"Falha ao obter cotacao para '{ticker}': {last_error}")
 
     async def _fetch_quotes_with_fallback(self, tickers: list[str]) -> dict[str, Quote]:
@@ -232,28 +274,43 @@ class MarketDataAggregator:
         quotes: dict[str, Quote] = {}
         last_error: Exception | None = None
 
-        for provider in self._price_providers.values():
+        for name, provider in self._price_providers.items():
             if not remaining:
                 break
+            if self._circuit_breaker.is_open(name):
+                logger.debug("provider_skipped batch=%s provider=%s reason=circuit_open", remaining, name)
+                continue
 
+            provider_tickers = [resolve_for_provider(t, name) for t in remaining]
             try:
                 async with self._semaphore:
-                    batch = await provider.get_quotes(remaining)
+                    batch = await provider.get_quotes(provider_tickers)
+                self._circuit_breaker.record_success(name)
+            except PermanentError as exc:
+                last_error = exc
+                logger.info("provider_permanent_error batch provider=%s error=%s", name, exc)
+                batch = {}
             except Exception as exc:
                 last_error = exc
+                self._circuit_breaker.record_failure(name)
+                logger.warning("provider_error batch provider=%s error=%s", name, exc)
                 batch = {}
 
-            normalized_batch = {ticker.upper(): quote for ticker, quote in batch.items()}
+            # Remap provider tickers back to canonical form
+            canonical_batch: dict[str, Quote] = {}
+            for provider_ticker, quote in batch.items():
+                canonical = to_canonical(provider_ticker)
+                canonical_batch[canonical] = quote.model_copy(update={"ticker": canonical})
+
             for ticker in remaining:
-                quote = normalized_batch.get(ticker)
-                if quote is not None:
-                    quotes[ticker] = quote
+                if ticker in canonical_batch:
+                    quotes[ticker] = canonical_batch[ticker]
+
             current_remaining = [ticker for ticker in remaining if ticker not in quotes]
             if current_remaining:
-                single_batch = await self._fetch_quotes_individually(provider, current_remaining)
-                for ticker, quote in single_batch.items():
-                    quotes[ticker] = quote
-            remaining = [ticker for ticker in current_remaining if ticker not in quotes]
+                single_batch = await self._fetch_quotes_individually(provider, current_remaining, name)
+                quotes.update(single_batch)
+            remaining = [ticker for ticker in remaining if ticker not in quotes]
 
         if remaining and not quotes:
             raise ValueError(f"Falha ao obter cotacoes para {remaining}: {last_error}")
@@ -263,16 +320,25 @@ class MarketDataAggregator:
         last_error: Exception | None = None
         for name, provider in self._dividend_providers.items():
             if self._circuit_breaker.is_open(name):
+                logger.debug("provider_skipped ticker=%s provider=%s reason=circuit_open", ticker, name)
                 continue
+            provider_ticker = resolve_for_provider(ticker, name)
             try:
                 async with self._semaphore:
-                    items = await provider.get_dividends(ticker)
+                    items = await provider.get_dividends(provider_ticker)
                 if items:
+                    normalized = [item.model_copy(update={"ticker": ticker}) for item in items]
                     self._circuit_breaker.record_success(name)
-                    return items
+                    logger.info("dividends_fetched ticker=%s provider=%s count=%d", ticker, name, len(normalized))
+                    return normalized
+                logger.debug("dividends_empty ticker=%s provider=%s", ticker, name)
+            except PermanentError as exc:
+                last_error = exc
+                logger.info("provider_permanent_error ticker=%s provider=%s error=%s", ticker, name, exc)
             except Exception as exc:
                 last_error = exc
                 self._circuit_breaker.record_failure(name)
+                logger.warning("provider_error ticker=%s provider=%s error=%s", ticker, name, exc)
         if last_error is not None:
             raise ValueError(f"Falha ao obter dividendos para '{ticker}': {last_error}")
         return []
@@ -281,13 +347,16 @@ class MarketDataAggregator:
         self,
         provider: BasePriceProvider,
         tickers: list[str],
+        provider_name: str = "",
     ) -> dict[str, Quote]:
-        async def _fetch_one(ticker: str) -> tuple[str, Quote | None]:
+        async def _fetch_one(canonical: str) -> tuple[str, Quote | None]:
+            provider_ticker = resolve_for_provider(canonical, provider_name)
             try:
                 async with self._semaphore:
-                    return ticker, await provider.get_quote(ticker)
+                    quote = await provider.get_quote(provider_ticker)
+                return canonical, quote.model_copy(update={"ticker": canonical})
             except Exception:
-                return ticker, None
+                return canonical, None
 
         results = await asyncio.gather(*(_fetch_one(ticker) for ticker in tickers))
         return {ticker: quote for ticker, quote in results if quote is not None}

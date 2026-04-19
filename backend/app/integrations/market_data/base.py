@@ -2,6 +2,18 @@
 
 from __future__ import annotations
 
+
+class ProviderError(Exception):
+    """Erro base de provider de mercado."""
+
+
+class TransientError(ProviderError):
+    """Falha temporaria (timeout, 429, 5xx) — circuit breaker deve registrar."""
+
+
+class PermanentError(ProviderError):
+    """Ticker invalido ou nao encontrado — nao aciona circuit breaker."""
+
 from abc import ABC, abstractmethod
 from datetime import date, datetime, timezone
 from decimal import Decimal

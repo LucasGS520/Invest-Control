@@ -68,6 +68,42 @@ async def _sync_all_dividends() -> None:
                 logger.warning("[scheduler] Falha ao sincronizar dividendos de %s: %s", ticker, exc)
 
 
+async def _review_market_health() -> None:
+    """Revisao periodica de saude dos providers e SLOs de mercado.
+
+    Loga um resumo das metricas acumuladas e emite WARNING se algum SLO
+    estiver em violacao. Para alerting externo (Slack, PagerDuty), adicionar
+    integracao aqui.
+    """
+    from app.core.config import settings
+    from app.integrations.market_data.aggregator import market_data_aggregator
+    from app.integrations.market_data.metrics import market_metrics
+
+    summary = market_metrics.summary()
+    hit_rate = market_metrics.cache_hit_rate()
+    error_rate = market_metrics.error_rate()
+    open_circuits = [
+        name
+        for name in market_data_aggregator._price_providers
+        if market_data_aggregator._circuit_breaker.is_open(name)
+    ]
+
+    logger.info("[health-review] metricas_mercado %s", summary)
+
+    issues: list[str] = []
+    if hit_rate is not None and hit_rate < settings.market_slo_min_cache_hit_rate:
+        issues.append(f"cache_hit_rate={hit_rate:.2%} < slo={settings.market_slo_min_cache_hit_rate:.0%}")
+    if error_rate is not None and error_rate > settings.market_slo_max_error_rate:
+        issues.append(f"error_rate={error_rate:.2%} > slo={settings.market_slo_max_error_rate:.0%}")
+    if open_circuits:
+        issues.append(f"circuit_breakers_abertos={open_circuits}")
+
+    if issues:
+        logger.warning("[health-review] SLO_VIOLADO issues=%s", issues)
+    else:
+        logger.info("[health-review] SLO_OK todos os indicadores dentro do limite")
+
+
 async def _check_all_alerts() -> None:
     """Avalia todos os alertas ativos e registra os disparados."""
     async with AsyncSessionLocal() as db:
@@ -85,6 +121,10 @@ def start_scheduler() -> None:
     Chamado no evento de startup da aplicação FastAPI.
     """
     from app.core.config import settings
+
+    if not settings.market_sync_enabled:
+        logger.warning("[scheduler] market_sync_enabled=false — jobs de mercado desabilitados")
+        return
 
     # Cotações: intervalo baseado na configuração de cache
     scheduler.add_job(
@@ -111,6 +151,17 @@ def start_scheduler() -> None:
         trigger="interval",
         minutes=30,
         id="check_alerts",
+        replace_existing=True,
+    )
+
+    # Revisão de saúde dos providers: toda segunda-feira às 9h
+    scheduler.add_job(
+        _review_market_health,
+        trigger="cron",
+        day_of_week="mon",
+        hour=9,
+        minute=0,
+        id="review_market_health",
         replace_existing=True,
     )
 

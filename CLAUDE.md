@@ -43,33 +43,33 @@ Carteira (nome + objetivo opcional)
 ---
 
 ### Resumo do Problema e Objetivo da Correção
-- **Problema:** O sistema mantém módulos de Calendário e Relatórios que desviam do fluxo principal transaction-first e aumentam complexidade funcional/técnica sem aderência ao objetivo atual do produto.
 
-- **Sintoma observado:** Há rotas, serviços, telas, navegação e testes dedicados a essas duas frentes, com acoplamento no dashboard e no bootstrap da API.
+- **Problema:** O núcleo transaction-first está funcional, porém há desalinhamento operacional na integração de mercado (normalização de ticker, observabilidade, governança de atualização e validação), gerando risco de inconsistência em cotações/proventos e impacto direto nas recomendações.
 
-- **Objetivo da correção:** Remover completamente páginas, endpoints e componentes de Calendário e Relatórios, preservando estabilidade do fluxo principal (carteiras, transações, mercado e alertas).
+- **Sintoma observado:** Falhas intermitentes por provider, comportamento inconsistente para tickers BR/US, baixa visibilidade de cache/fallback/circuit breaker e critérios de qualidade ainda pouco “enforceáveis” em CI/produção.
+
+- **Objetivo da correção:** Restaurar previsibilidade e qualidade do fluxo principal (carteira → transação → posição → recomendação), com dados de mercado confiáveis, monitoráveis e auditáveis.
 
 - **Premissas:**
-- O objetivo de produto validado é priorizar carteira + transações + posição + preço médio + desempenho.
-- APIs consumidoras externas para calendário/relatórios não devem ser mantidas.
-- O dashboard pode perder blocos não essenciais desde que permaneça funcional e sem erro.
+  - Fluxo transaction-first permanece como contrato de produto.
+  - Endpoints removidos de calendário/relatórios não serão reintroduzidos nesta correção.
+  - Sem mudança de regra de negócio principal de aporte, apenas estabilização de dados e execução.
 
 ---
 
 ### Riscos, Impacto e Decisões
-- **Decisão Técnica Principal:** Remoção física do código (não apenas ocultar menu), com limpeza de imports e contratos para eliminar dívida técnica e evitar rotas órfãs.
 
-- **Risco Principal:** Quebra de dashboard e navegação por dependência direta de chamadas para /api/reports e /api/calendar, causando erro em runtime se não houver desacoplamento simultâneo.
+- **Decisão Técnica Principal:** Criar uma camada canônica de normalização/resolução de ticker por provider, com observabilidade obrigatória no caminho de dados de mercado (cache, fallback, circuit breaker, latência e erro).
 
-- **Impacto atual:** Complexidade desnecessária em backend, frontend e suíte de testes; manutenção dispersa fora do foco do produto.
+- **Risco Principal:** Alterar resolução de ticker sem validação gradual pode reduzir cobertura de ativos ou degradar acurácia temporariamente.
+
+- **Impacto atual:** Recomendações, alertas e performance de carteira podem divergir por inconsistência de dados externos; operação fica reativa por falta de sinais claros de saúde.
 
 - **Dependências:**
-- Bootstrap de API em main.py, main.py, main.py, main.py.
-- Rotas dedicadas em calendar.py e reports.py.
-- Serviço/schema de relatórios em reports_service.py e reports.py.
-- Schema de calendário em calendar.py.
-- Frontend: roteador index.ts, index.ts, menu App.vue, dashboard DashboardView.vue.
-- Testes dedicados: test_calendar.py e test_reports.py.
+  - Variáveis de ambiente e credenciais dos providers.
+  - Ordem de providers e timeouts configuráveis.
+  - Tabelas de cache local (market_quotes e dividends).
+  - Pipeline de testes e ambiente de homologação para validação controlada.
 
 ---
 

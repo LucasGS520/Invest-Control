@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # Integração de dados de mercado (brapi.dev)
     brapi_token: str = ""
     market_data_cache_minutes: int = 15
+    # SLA de atualizacao por tipo de ativo (minutos). Fallback para market_data_cache_minutes.
+    asset_type_sla_minutes: dict[str, int] = Field(
+        default_factory=lambda: {"ACAO": 15, "FII": 30, "ETF": 15}
+    )
     price_providers_order: list[str] = Field(
         default_factory=lambda: ["yfinance", "twelvedata", "brapi"]
     )
@@ -37,6 +41,11 @@ class Settings(BaseSettings):
     asset_metadata_stale_hours: int = 24
     circuit_breaker_threshold: int = 3
     circuit_breaker_reset_seconds: float = 60.0
+    # Desabilitar sync automático em incidentes: MARKET_SYNC_ENABLED=false
+    market_sync_enabled: bool = True
+    # SLOs operacionais do fluxo de mercado
+    market_slo_min_cache_hit_rate: float = 0.70
+    market_slo_max_error_rate: float = 0.10
     provider_timeouts_seconds: dict[str, float] = Field(
         default_factory=lambda: {
             "default": 10.0,
