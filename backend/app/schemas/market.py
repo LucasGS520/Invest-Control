@@ -52,3 +52,33 @@ class CeilingOut(BaseModel):
     desired_dy: Decimal
     is_below_ceiling: bool
     ceiling_distance_pct: Decimal | None
+
+
+class AssetSearchResult(BaseModel):
+    ticker: str
+    name: str
+    sector: str | None
+    asset_type: str
+    price: Decimal | None = None
+    change_percent: Decimal | None = None
+
+
+class UserPositionContext(BaseModel):
+    portfolio_id: int
+    portfolio_name: str
+    quantity: int
+    avg_price: Decimal
+    current_value: Decimal | None = None
+    return_pct: Decimal | None = None
+
+
+class AssetDetailOut(BaseModel):
+    ticker: str
+    name: str
+    sector: str | None
+    asset_type: str
+    price: Decimal | None = None
+    change_percent: Decimal | None = None
+    volume: Decimal | None = None
+    positions: list[UserPositionContext] = []
+    total_dividends_received: Decimal | None = None

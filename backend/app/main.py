@@ -7,10 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.alerts import router as alerts_router
 from app.api.routes.aporte import router as aporte_router
-from app.api.routes.reports import router as reports_router
 from app.api.routes.assets import router as assets_router
 from app.api.routes.auth import router as auth_router
-from app.api.routes.calendar import router as calendar_router
 from app.api.routes.health import router as health_router
 from app.api.routes.market import router as market_router
 from app.api.routes.portfolios import router as portfolios_router
@@ -56,9 +54,7 @@ app.include_router(transactions_router, prefix="/api")
 app.include_router(assets_router, prefix="/api")
 app.include_router(market_router, prefix="/api")
 app.include_router(aporte_router, prefix="/api")
-app.include_router(calendar_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
-app.include_router(reports_router, prefix="/api")
 
 
 @app.get("/", tags=["Root"], summary="Resumo da API")

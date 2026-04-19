@@ -1,84 +1,76 @@
-# Codex — Contexto e Instruções
+# Agentes de IA — Contexto e Instruções
 
 ## Sobre o Projeto *InvestControl*
-O InvestControl é uma plataforma que se encaixa em um ambiente maior de gestão financeira pessoal, atuando como um sistema de apoio à decisão para investidores.
-Ele se integra com fontes externas de dados de mercado para fornecer informações atualizadas e recomendações.
-A arquitetura modular do sistema, com um backend robusto, permite que ele seja a base para futuras expansões e integrações com outras ferramentas financeiras, embora não execute ordens nem substitua consultoria financeira.
 
-O projeto é separado por responsabilidades, em diferentes módulos:
+Plataforma de apoio à decisão para investidores. Fluxo centrado em transações: o usuário cria uma carteira simples, registra compras/vendas buscando o ativo por ticker, e o sistema calcula automaticamente posição, preço médio e desempenho com dados de mercado de fontes externas.
 
-**Backend**:
-
-**Frontend**:
-
-
-> Informações sobre a Stack e Tecnologias existentes em [STACK_INVEST.md](STACK_INVEST.md)
+> Detalhes da stack em [STACK_INVEST.md](STACK_INVEST.md)
 
 ---
 
-## Objetivo e Problemas a ser Resolvido
+## Arquitetura atual (pós-alinhamento)
 
-**Objetivo:** adicionar uma camada de integração/aggregaçao de fontes externas de dados de mercado dentro de `app/` para unificar cotações, dividendos e dados estruturais, usando as fontes escolhidas (yfinance, Twelve Data, StatusInvest, Fundamentus, B3), mantendo compatibilidade com a API já usada por `app/services/market_data_service.py` e por `app/tasks/update_quotes.py`.
+### Backend
 
-- **Estratégia de Execução:** criar modelos unificados (Pydantic) para `Quote` e `DividendItem`; implementar providers concretos (yfinance, Twelve Data, StatusInvest, Fundamentus, B3); implementar agregador que:
-  - tenta providers por ordem configurada;
-  - usa fetch em lote quando disponível;
-  - persiste resultados nos modelos existentes (`MarketQuote`, `Dividend`);
-  - exporta mesma superfície que `market_data_service` (compatibilidade).
+**Fluxo de transação:**
+1. `POST /portfolios/{id}/transactions` recebe `{ ticker, transaction_type, quantity, price, fees?, date }`
+2. `asset_service.get_or_create_asset(db, ticker)` cria o ativo se não existir e tenta enriquecê-lo via `MarketDataAggregator.get_asset_info`
+3. `portfolio_service.apply_transaction` registra a `Transaction` e atualiza `PortfolioAsset` (preço médio ponderado)
+4. `DELETE /portfolios/{id}/transactions/{tx_id}` remove e chama `recalculate_position` (replay completo)
 
-- **Premissas**
-  - Banco PostgreSQL já disponível (como no projeto).
-  - Scheduler continuará chamando `market_data_service.get_quote` e `sync_dividends` (assinaturas existentes).
-  - A aplicação tem acesso à internet para consultar provedores.
-  - Chaves de API (Twelve Data, B3 quando necessário) serão fornecidas via variáveis de ambiente.
+**Integração de mercado:**
+- `MarketDataAggregator` orquestra fallback entre providers com `_CircuitBreaker` (abre após 3 falhas, reseta em 60s)
+- Ordem de cotação: `yfinance → twelvedata → brapi`
+- Ordem de dividendos: `statusinvest → fundamentus → brapi`
+- Enriquecimento de ativo (`AssetInfo`): `yfinance` e `brapi` implementam `BaseAssetInfoProvider`
+- Cache de cotações: TTL configurável (`MARKET_DATA_CACHE_MINUTES`, padrão 15 min)
+- Enriquecimento de metadados: disparado quando `asset.name == asset.ticker` (placeholder)
 
----
+**APIs orientadas ao produto:**
+- `GET /market/search?q=` — busca ativo por ticker/nome no banco local
+- `GET /market/asset/{ticker}` — detalhe: cotação + posição do usuário + dividendos
+- `GET /portfolios/{id}` — resumo com posições enriquecidas (current_price, return_pct, change_percent)
 
-## Análise de Riscos e Decisões Chave
+### Frontend
 
-**Decisões Técnicas Principais**
-  - **Prioridade de fontes (configurável):** price → [yfinance, Twelve Data, brapi], dividends → [StatusInvest, Fundamentus, brapi]; B3 para dados estruturais/metadata. Ordem definida via `core.config`.
-  - **Contrato unificado:** providers retornam objetos tipados (`Quote`, `DividendItem`) e agregador persiste em `MarketQuote`/`Dividend`.
-  - **Compatibilidade:** manter `app/services/market_data_service.py` com mesmas funções públicas (`get_quote(db, ticker)`, `sync_dividends(db, ticker)`) — refatorado como adapter.
-  - **Assincronia:** código principal em async; providers síncronos (yfinance) executam via `asyncio.to_thread`.
-  - **Cache primário:** usar as tabelas já existentes como cache (evitar introduzir Redis inicialmente). Redis opcional como tarefa futura.
-  - **Batch fetching:** onde disponível (Twelve Data, brapi, yfinance Tickers), usar chamadas em lote para eficiência na `update_quotes`.
-  - **Rate limiting & backoff:** cada provider com timeout curto + retries exponenciais e circuit-breaker simples por provider.
+**Macroáreas:**
+1. **Carteira** (`/carteiras`, `/carteiras/:id`) — visão de posições com retorno em tempo real, fluxo de transação via busca de ticker
+2. **Dashboard/Descobrir** (`/dashboard`) — KPIs da carteira principal + seção Descobrir com busca de ativo e detalhe
+3. **Demais rotas** — relatórios, aporte, calendário, alertas (mantidos)
 
-- **Riscos Principais**
-  - Scraping (StatusInvest/Fundamentus) fragiliza com mudanças de HTML.
-  - Licenciamento/disponibilidade da B3.
-  - Rate limits / bloqueios por provedores (yahoo/TwelveData).
-  - Inconsistência de mapeamento de tickers entre fontes (BR vs. US suffixes).
-  - Aumento de latência na `update_quotes` se não usar batch/concorrência controlada.
-
-- **Dependências**
-  - Runtime: `yfinance`, `pandas`, `twelvedata` (ou httpx), `beautifulsoup4`, `lxml`, `httpx` (já presente), opcional `aioredis` (cache).
-  - Infra/ops: variáveis de ambiente para chaves (`TWELVEDATA_API_KEY`, possivelmente `B3_API_KEY`), internet outbound.
-
-- **Impactos Arquiteturais**
-  - Novo package `backend/app/integrations/market_data` — isolado da lógica de serviço.
-  - Imagem Docker maior (pandas, lxml).
-  - Latência de atualização aumenta sem batch; `tasks/update_quotes.py` deve usar batches e limite de concorrência.
-  - Observabilidade requerida: logs e métricas por provider.
+**Fluxo de transação no frontend:**
+- Usuário digita ticker no input → debounce → `GET /market/search?q=` → dropdown de sugestões
+- Seleciona ativo → preview com nome/setor/cotação preenche automaticamente o preço
+- Preenche qty, tipo, data → `POST /portfolios/{id}/transactions` com `ticker`
 
 ---
 
-### Resultado Esperado
+## Decisões técnicas registradas
 
-- Nova pasta `backend/app/integrations/market_data` com interfaces e providers, um `MarketDataAggregator` configurável (ordem de prioridade + fallback), adaptação mínima de `app/services/market_data_service.py` para delegar ao agregador sem mudar assinaturas públicas, testes e documentação atualizados.
+| Decisão | Motivo |
+|---|---|
+| `ticker` em vez de `asset_id` na criação de transação | Remove obrigatoriedade de cadastro prévio de ativo |
+| Enriquecimento fail-safe (try/except silencioso) | Falha de provider não bloqueia registro de transação |
+| `recalculate_position` por replay | Garante consistência após deleção de transação |
+| Circuit breaker por provider | Evita cascata de timeouts em providers instáveis |
+| `name == ticker` como indicador de placeholder | Simples e sem coluna extra; re-enriquece quando necessário |
 
 ---
 
-## Regras e Instruções de Execução
-**Regras obrigatórias de economia (NÃO IGNORAR)**
-1) NÃO liste árvore inteira do projeto (evite `tree`, `ls -R`, etc.). Se precisar, liste apenas pastas-alvo da FASE.
-2) NÃO leia arquivos completos. Leia no máximo 120 linhas por arquivo (ou trechos específicos). Se precisar de mais contextualização, peça antes.
-3) Priorize busca (rg/grep) para localizar pontos de mudança antes de abrir arquivos.
-5) Não cole conteúdo integral de arquivos na resposta. Mostre apenas:
-   - arquivos alterados
-   - resumo do diff (o que mudou e por quê)
-   - comandos executados e resultados
-6) Execute somente UMA FASE por vez. Ao terminar a FASE:
-   - pare e peça autorização para a próxima FASE
-7) Se detectar duplicação/overreach fora do escopo, interrompa e reporte.
+## Pontos em aberto
+
+- Estratégia final de ticker normalization (sufixos BR `.SA` para yfinance/twelvedata)
+- SLA de atualização de cotações por tipo de ativo (ação vs. FII vs. ETF)
+- Edição de transação com recálculo auditável (soft edit vs. delete+create)
+- Snapshot/materialização periódica de posição vs. cálculo sob demanda
+
+---
+
+## Regras obrigatórias de economia (NÃO IGNORAR)
+
+1. NÃO liste árvore inteira do projeto (`tree`, `ls -R`, etc.)
+2. NÃO leia arquivos completos. Máximo 120 linhas por vez
+3. Priorize busca (`rg`/`grep`) para localizar pontos de mudança antes de abrir arquivos
+4. Não cole conteúdo integral de arquivos na resposta
+5. Execute apenas UMA FASE por vez; pare e peça autorização para a próxima
+6. Se detectar duplicação/overreach fora do escopo, interrompa e reporte

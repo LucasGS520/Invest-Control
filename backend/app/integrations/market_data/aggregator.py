@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.models.dividend import Dividend
 from app.db.models.market_data import MarketQuote
-from app.integrations.market_data.base import BaseDividendProvider, BasePriceProvider, DividendItem, Quote
+from app.integrations.market_data.base import AssetInfo, BaseAssetInfoProvider, BaseDividendProvider, BasePriceProvider, DividendItem, Quote
 from app.integrations.market_data.providers import (
     BrapiProvider,
     FundamentusProvider,
@@ -21,6 +21,36 @@ from app.integrations.market_data.providers import (
 )
 
 
+class _CircuitBreaker:
+    """Abre o circuito de um provider após falhas consecutivas."""
+
+    def __init__(self, threshold: int = 3, reset_seconds: float = 60.0) -> None:
+        self._failures: dict[str, int] = {}
+        self._open_until: dict[str, datetime] = {}
+        self._threshold = threshold
+        self._reset_seconds = reset_seconds
+
+    def is_open(self, name: str) -> bool:
+        until = self._open_until.get(name)
+        if until is None:
+            return False
+        if datetime.now(timezone.utc) >= until:
+            self._failures[name] = 0
+            del self._open_until[name]
+            return False
+        return True
+
+    def record_failure(self, name: str) -> None:
+        count = self._failures.get(name, 0) + 1
+        self._failures[name] = count
+        if count >= self._threshold:
+            self._open_until[name] = datetime.now(timezone.utc) + timedelta(seconds=self._reset_seconds)
+
+    def record_success(self, name: str) -> None:
+        self._failures[name] = 0
+        self._open_until.pop(name, None)
+
+
 class MarketDataAggregator:
     """Orquestra fallback entre providers e persistencia local."""
 
@@ -28,6 +58,10 @@ class MarketDataAggregator:
         self._price_providers = self._build_price_providers()
         self._dividend_providers = self._build_dividend_providers()
         self._semaphore = asyncio.Semaphore(max(settings.market_data_concurrency, 1))
+        self._circuit_breaker = _CircuitBreaker(
+            threshold=settings.circuit_breaker_threshold,
+            reset_seconds=settings.circuit_breaker_reset_seconds,
+        )
 
     async def get_quote(self, db: AsyncSession, ticker: str) -> MarketQuote:
         ticker = ticker.upper()
@@ -63,6 +97,23 @@ class MarketDataAggregator:
                 await db.refresh(persisted[item.ticker])
 
         return persisted
+
+    async def get_asset_info(self, ticker: str) -> AssetInfo | None:
+        """Busca metadados do ativo com fallback entre providers."""
+        ticker = ticker.upper()
+        for name, provider in self._price_providers.items():
+            if not isinstance(provider, BaseAssetInfoProvider):
+                continue
+            if self._circuit_breaker.is_open(name):
+                continue
+            try:
+                async with self._semaphore:
+                    info = await provider.get_asset_info(ticker)
+                self._circuit_breaker.record_success(name)
+                return info
+            except Exception:
+                self._circuit_breaker.record_failure(name)
+        return None
 
     async def sync_dividends(self, db: AsyncSession, ticker: str) -> list[Dividend]:
         ticker = ticker.upper()
@@ -163,12 +214,17 @@ class MarketDataAggregator:
 
     async def _fetch_quote_with_fallback(self, ticker: str) -> Quote:
         last_error: Exception | None = None
-        for provider in self._price_providers.values():
+        for name, provider in self._price_providers.items():
+            if self._circuit_breaker.is_open(name):
+                continue
             try:
                 async with self._semaphore:
-                    return await provider.get_quote(ticker)
+                    result = await provider.get_quote(ticker)
+                self._circuit_breaker.record_success(name)
+                return result
             except Exception as exc:
                 last_error = exc
+                self._circuit_breaker.record_failure(name)
         raise ValueError(f"Falha ao obter cotacao para '{ticker}': {last_error}")
 
     async def _fetch_quotes_with_fallback(self, tickers: list[str]) -> dict[str, Quote]:
@@ -205,14 +261,18 @@ class MarketDataAggregator:
 
     async def _fetch_dividends_with_fallback(self, ticker: str) -> list[DividendItem]:
         last_error: Exception | None = None
-        for provider in self._dividend_providers.values():
+        for name, provider in self._dividend_providers.items():
+            if self._circuit_breaker.is_open(name):
+                continue
             try:
                 async with self._semaphore:
                     items = await provider.get_dividends(ticker)
                 if items:
+                    self._circuit_breaker.record_success(name)
                     return items
             except Exception as exc:
                 last_error = exc
+                self._circuit_breaker.record_failure(name)
         if last_error is not None:
             raise ValueError(f"Falha ao obter dividendos para '{ticker}': {last_error}")
         return []

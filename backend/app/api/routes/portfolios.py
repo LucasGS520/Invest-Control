@@ -50,7 +50,13 @@ async def create_portfolio(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Portfolio:
-    portfolio = Portfolio(user_id=user.id, name=data.name, description=data.description)
+    portfolio = Portfolio(
+        user_id=user.id,
+        name=data.name,
+        description=data.description,
+        objective=data.objective,
+        currency=data.currency,
+    )
     db.add(portfolio)
     await db.commit()
     await db.refresh(portfolio)
@@ -79,6 +85,10 @@ async def update_portfolio(
         portfolio.name = data.name
     if data.description is not None:
         portfolio.description = data.description
+    if data.objective is not None:
+        portfolio.objective = data.objective
+    if data.currency is not None:
+        portfolio.currency = data.currency
     await db.commit()
     await db.refresh(portfolio)
     return portfolio

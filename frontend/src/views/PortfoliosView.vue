@@ -10,6 +10,7 @@ const portfolioStore = usePortfolioStore()
 const showForm = ref(false)
 const newName = ref('')
 const newDescription = ref('')
+const newObjective = ref('')
 const formLoading = ref(false)
 const formError = ref('')
 
@@ -30,9 +31,11 @@ async function createPortfolio() {
     await portfolioStore.createPortfolio({
       name: newName.value.trim(),
       description: newDescription.value.trim() || undefined,
+      objective: newObjective.value.trim() || undefined,
     })
     newName.value = ''
     newDescription.value = ''
+    newObjective.value = ''
     showForm.value = false
   } catch (err: unknown) {
     const e = err as { response?: { data?: { detail?: string } } }
@@ -84,6 +87,10 @@ function fmt(dt: string): string {
           Descrição (opcional)
           <input v-model="newDescription" type="text" placeholder="Breve descrição" />
         </label>
+        <label class="form-field">
+          Objetivo (opcional)
+          <input v-model="newObjective" type="text" placeholder="ex: Renda passiva" maxlength="200" />
+        </label>
       </div>
       <p v-if="formError" class="form-error">{{ formError }}</p>
       <button class="btn-primary" :disabled="formLoading" @click="createPortfolio">
@@ -116,9 +123,11 @@ function fmt(dt: string): string {
         </div>
 
         <p v-if="p.description" class="portfolio-description">{{ p.description }}</p>
+        <p v-if="p.objective" class="portfolio-objective">🎯 {{ p.objective }}</p>
 
         <div class="portfolio-meta">
           <span class="meta-item">Criada em {{ fmt(p.created_at) }}</span>
+          <span class="meta-item currency-badge">{{ p.currency ?? 'BRL' }}</span>
         </div>
 
         <div class="portfolio-actions" @click.stop>

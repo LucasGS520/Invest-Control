@@ -4,24 +4,28 @@
 
 **Autor:** Lucas Gabriel
 
-Este documento apresenta a Especificação de Requisitos de Software (SRS) para o projeto InvestControl, uma plataforma inovadora focada em Aportes Sob Demanda e gestão de carteiras com ênfase em dividendos.
-O objetivo é fornecer uma base clara e abrangente para o desenvolvimento, testes e manutenção do software, garantindo o alinhamento entre todas as partes interessadas.
+Este documento apresenta a Especificação de Requisitos de Software (SRS) para o projeto InvestControl, uma plataforma focada em gestão de carteiras de investimento com fluxo transaction-first e Aportes Sob Demanda.
+O objetivo é fornecer uma base clara e verificável para o desenvolvimento, testes e manutenção do software, garantindo alinhamento entre todas as partes interessadas.
+
+> **Revisão:** Abril/2026 — Alinhamento ao fluxo transaction-first implementado. Módulos de Calendário de Proventos (FR5) e Relatórios (FR7) foram removidos do escopo operacional desta versão para redução de complexidade técnica e foco no fluxo principal.
 
 # Introdução
 
 ## Objetivo do Documento
-Este documento define, de forma completa e verificável, os requisitos funcionais e não funcionais do InvestControl — uma plataforma orientada a Aportes Sob Demanda, recomendações explicadas e gestão de carteiras com foco em dividendos.
+Este documento define, de forma completa e verificável, os requisitos funcionais e não funcionais do InvestControl — uma plataforma orientada a gestão de carteiras, registro de transações e Aportes Sob Demanda, com foco em dividendos e apoio à decisão do investidor.
 Seu objetivo é alinhar entendimento entre stakeholders e orientar desenho, implementação, testes e operação do sistema.
-A ênfase estratégica está em um backend robusto que viabilize recomendações no momento do aporte com base em dividend yield, preço-teto (método Barsi) e calendário de proventos.
+A ênfase estratégica está em um backend robusto que viabilize o fluxo transaction-first: carteira → transação → posição → preço médio → retorno, com recomendações de aporte baseadas em dividend yield e preço-teto (método Barsi).
 
 ## Escopo do Sistema
 
 ### Em Escopo:
 
-1. Aportes Sob Demanda : Entrada de valor e recomendações ranqueadas e justificadas.
-2. Gestão de Carteira/Ativos/Transações : Incluindo métricas básicas (preço médio, rentabilidade).
-3. Integração de Dados : Cotações, dividendos/proventos, histórico; cache e atualizações.
-4. Funcionalidades Complementares Essenciais : DY (atual/histórico), preço-teto (Barsi), oportunidades, calendário de proventos, recomendações personalizadas, acompanhamento de performance, alertas inteligentes.
+1. **Aportes Sob Demanda** : Entrada de valor e recomendações ranqueadas e justificadas.
+2. **Gestão de Carteira/Ativos/Transações** : Fluxo transaction-first; preço médio, posição e rentabilidade calculados automaticamente por replay de transações.
+3. **Integração de Dados de Mercado** : Cotações, dividendos/proventos e histórico via aggregator multi-provider com fallback e circuit breaker; cache local.
+4. **Motor de Regras** : DY (atual/histórico), preço-teto (Barsi), identificação de oportunidades.
+5. **Alertas Inteligentes** : Alertas de preço/teto e notificações configuráveis.
+6. **Descoberta de Ativos** : Busca por ticker/nome com cotação em cache e contexto da carteira do usuário.
 
 ### Fora do Escopo (Não Faz):
 
@@ -51,35 +55,32 @@ Ele se integra com fontes externas de dados de mercado para fornecer informaçõ
 A arquitetura modular do sistema, com um backend robusto, permite que ele seja a base para futuras expansões e integrações com outras ferramentas financeiras, embora não execute ordens nem substitua consultoria financeira.
 
 ## Funções do Produto
-Em alto nível, o InvestControl permite que o usuário informe um valor de aporte e receba uma lista ranqueada das melhores oportunidades para aquele momento, com justificativas claras, mesmo quando o valor não cobre “lotes cheios”.
-Complementarmente, o sistema oferece gestão de carteiras, coleta/atualização de dados de mercado, relatórios e alertas. As funcionalidades principais incluem:
+Em alto nível, o InvestControl permite que o usuário crie carteiras, registre transações e receba posição, preço médio e retorno calculados automaticamente. Ao informar um valor de aporte, recebe uma lista ranqueada das melhores oportunidades com justificativas claras.
+As funcionalidades principais incluem:
 
-1. Aportes Sob Demanda :
-   - Recomendações de compra baseadas no valor disponível, considerando preço atual, distância ao preço-teto, DY atual e histórico, proximidade de datas com/ex, composição da carteira e quedas recentes.
+1. **Aportes Sob Demanda** :
+   - Recomendações de compra baseadas no valor disponível, considerando preço atual, distância ao preço-teto, DY atual e histórico, composição da carteira e quedas recentes.
 
-3. Gestão de Carteiras e Ativos :
-   - CRUD de carteiras, ativos e transações; cálculo de preço médio, valor total e rentabilidade.
+2. **Gestão de Carteiras e Transações** :
+   - CRUD de carteiras e transações; resolução automática de ativo por ticker; cálculo de preço médio, posição e rentabilidade por replay de transações.
 
-5. Integração de Dados de Mercado :
-   - Atualização de cotações, dividendos/proventos, histórico; cache e atualizações.
+3. **Integração de Dados de Mercado** :
+   - Aggregator multi-provider com fallback configurável (yfinance, Twelve Data, brapi) e circuit breaker; cache local em `market_quotes` e `dividends`; scheduler de atualização periódica.
 
-7. Motor de Regras Complementares :
-   - Cálculo de DY, preço-teto (Barsi), identificação de oportunidades e calendário de proventos.
+4. **Motor de Regras** :
+   - Cálculo de DY atual/histórico, preço-teto (Barsi) e identificação de oportunidades (abaixo do teto, alta de DY, consistência histórica).
 
-9. Recomendações Personalizadas :
-    - Baseadas na carteira atual, preferência setorial/risco e diversificação.
+5. **Descoberta de Ativos** :
+   - Busca por ticker ou nome com cotação em cache e contexto de posição da carteira do usuário.
 
-11. Acompanhamento e Relatórios :
-    - Performance vs. benchmarks; histórico de aportes/transações; projeções.
+6. **Alertas Inteligentes** :
+   - Alertas de preço/teto e quedas significativas; notificações configuráveis por canal.
 
-13. Alertas Inteligentes :
-    - Alertas de preço/teto, proximidade de datas com/ex, quedas significativas e lembretes de revisão.
+7. **Gestão de Usuários e Segurança** :
+   - Autenticação JWT; perfis/preferências; todos os endpoints protegidos.
 
-15. Gestão de Usuários e Segurança :
-    - Autenticação/Autorização; perfis/preferências; endpoints protegidos.
-
-17. Interfaces (API/Web com suporte Mobile) :
-    - API documentada; web com foco em aporte sob demanda; mobile opcional com notificações.
+8. **Interfaces (API/Web)** :
+   - API REST documentada (Swagger/OpenAPI); interface web com dashboard, carteiras, transações, aporte e alertas.
 
 ---
 
@@ -129,22 +130,23 @@ Os requisitos funcionais descrevem as funcionalidades que o sistema deve oferece
 - Deve manter um cache e mecanismo de refresh para os dados de mercado.
 - Deve expor os dados de mercado via API.
 
-**FR4 — Motor de Regras Complementares** :
+**FR4 — Motor de Regras** :
 - O sistema deve calcular DY atual/histórico e permitir comparações.
 - Deve calcular o preço-teto (método Barsi).
 - Deve identificar oportunidades (abaixo do teto, quedas, alta de DY, consistência histórica).
 
-**FR5 — Calendário de Proventos** :
-- O sistema deve coletar datas de pagamento de proventos.
-- Deve identificar datas com/ex.
-- Deve sugerir janelas e projeções de renda com base nos proventos.
+**FR5 — Calendário de Proventos** *(removido do escopo operacional — Abril/2026)* :
+- Funcionalidade removida para redução de complexidade técnica e foco no fluxo transaction-first.
+- Dados de dividendos continuam sendo coletados e armazenados via aggregator (tabela `dividends`), mas não há endpoint nem UI dedicados.
+- Reavaliação prevista em fase posterior.
 
 **FR6 — Recomendações Personalizadas** :
 - O sistema deve personalizar recomendações por carteira atual, preferência setorial/risco e diversificação.
 
-**FR7 — Acompanhamento e Relatórios** :
-- O sistema deve fornecer acompanhamento de performance vs benchmarks.
-- Deve apresentar histórico de aportes/transações e projeções.
+**FR7 — Acompanhamento e Relatórios** *(removido do escopo operacional — Abril/2026)* :
+- Endpoints `/api/reports/*` e views de relatório removidos para eliminar dívida técnica.
+- Métricas de performance (patrimônio atual, retorno total) passam a ser calculadas diretamente das posições via `GET /portfolios/{id}` e exibidas no dashboard.
+- Relatórios avançados (vs. benchmarks, projeções) permanecem como requisito futuro.
 
 **FR8  — Alertas Inteligentes** :
 - O sistema deve gerar alertas de preço/teto, proximidade de datas com/ex, quedas significativas e lembretes de revisão.
@@ -178,21 +180,21 @@ atributos de qualidade.
 **NFR4- Observabilidade** :
 - Deve gerar logs estruturados.
 
-**NFR5- Segurança e Privacidade** :
+**NFR5 — Segurança e Privacidade** :
 - O sistema deve proteger dados pessoais (LGPD).
 - Deve utilizar criptografia em repouso e em trânsito.
 - Deve implementar autenticação JWT e controle de acesso baseado em papéis (RBAC).
 
-**NFR5- Manutenibilidade** :
+**NFR6 — Manutenibilidade** :
 - O código deve ser modular e bem documentado em PT-BR.
 - As migrações de banco de dados devem ser versionadas.
 - Deve possuir um pipeline de Integração Contínua (CI) básico.
 
-**NFR6- Portabilidade/Compatibilidade** :
+**NFR7 — Portabilidade/Compatibilidade** :
 - A implantação deve ser conteinerizada.
 - Os ambientes (desenvolvimento, homologação, produção) devem ser reproduzíveis.
 
-**NFR7- Qualidade de Dados** :
+**NFR8 — Qualidade de Dados** :
 - O sistema deve realizar validação e garantir a coerência temporal dos dados.
 - Deve implementar versionamento e linhagem mínima de dados de mercado.
 
@@ -206,9 +208,6 @@ Os critérios de aceitação e validação definem como cada requisito será tes
 **Aportes Sob Demanda** :
 * Critério1 : Dado um valor de aporte válido, quando o usuário solicitar recomendações, então o sistema retorna uma lista ordenada com, no mínimo,  justificativas por ativo (p. ex., DY, distância ao preço-teto, data com/ex).
 * Critério2 : O tempo de resposta (P) é ≤ , segundos e nenhuma recomendação utiliza dados com “idade” superior à janela configurada.
-
-**Calendário de Proventos** :
-* Critério : Para cada ativo suportado, o sistema exibe a próxima data com/ex e previsão/valor histórico disponível; envia alerta conforme preferências.
 
 **Alertas Inteligentes** :
 * Critério : Ao configurar um alvo de preço ou proximidade de data com/ex, quando a condição ocorrer, então um alerta é gerado e entregue no canal escolhido.
@@ -227,7 +226,53 @@ As seguintes métricas serão utilizadas para avaliar o sucesso do projeto e a a
 - Engajamento : ≥ % dos usuários ativos configuram ao menos alerta/semana.
 - Confiabilidade : Uptime mensal ≥ ,%; taxa de falhas críticas de API < ,%.
 - Precisão operacional de datas de proventos : ≥ % de correspondência com fontes oficiais.
-### Nota de Implementação Atual - Fontes Externas de Mercado
+---
+
+# Estado Atual da Implementação (Abril/2026)
+
+## Fluxo Principal Implementado (transaction-first)
+
+```
+Carteira (nome + objetivo opcional)
+  └─ Registrar transação → busca ticker → sistema resolve ativo automaticamente
+       └─ Posição, preço médio e retorno calculados automaticamente por replay
+            └─ Dashboard: patrimônio atual, variação total, Descobrir ativos
+```
+
+## Contratos de API Ativos
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/portfolios/{id}/transactions` | Registrar transação `{ ticker, transaction_type, quantity, price, fees?, date }` |
+| `DELETE` | `/portfolios/{id}/transactions/{tx_id}` | Remove transação e recalcula posição por replay |
+| `GET` | `/market/search?q=` | Busca ativo local com cotação do cache |
+| `GET` | `/market/asset/{ticker}` | Detalhe do ativo com contexto da carteira do usuário |
+| `GET` | `/portfolios/{id}` | Posições com `current_price`, `return_pct`, `change_percent`, `total_invested` |
+
+## Módulos Implementados
+
+| Módulo | Status | Observação |
+|---|---|---|
+| Autenticação JWT | ✅ Implementado | Todos os endpoints protegidos |
+| Gestão de Carteiras | ✅ Implementado | CRUD completo |
+| Transações / Posições | ✅ Implementado | Replay-based, preço médio automático |
+| Aporte Sob Demanda | ✅ Implementado | Motor de regras com DY e preço-teto Barsi |
+| Market Data Aggregator | ✅ Implementado | Fallback multi-provider + circuit breaker |
+| Alertas | ✅ Implementado | Configuração por ticker e condição |
+| Descoberta de Ativos | ✅ Implementado | Busca com cotação em cache |
+| Calendário de Proventos | ❌ Removido (Abril/2026) | Ver FR5 |
+| Relatórios / Performance | ❌ Removido (Abril/2026) | Ver FR7 |
+
+## Pontos em Aberto (Backlog Técnico)
+
+- Normalização de ticker para sufixos BR/US (`.SA` em yfinance/twelvedata).
+- SLA de atualização diferenciado por tipo de ativo (FII vs. ação vs. ETF).
+- Edição de transação com trilha de auditoria (atualmente: delete + recriar).
+- Snapshot/materialização periódica de posição para performance em carteiras grandes.
+
+---
+
+### Nota de Implementação Atual — Fontes Externas de Mercado
 
 A implementação atual do backend adota uma camada de agregação de providers para dados de mercado, com prioridade configurável por tipo de dado.
 

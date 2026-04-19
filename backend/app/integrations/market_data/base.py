@@ -78,3 +78,28 @@ class BaseDividendProvider(BaseProvider):
     @abstractmethod
     async def get_dividends(self, ticker: str) -> list[DividendItem]:
         """Retorna os proventos conhecidos para um ticker."""
+
+
+class AssetInfo(BaseModel):
+    """Metadados de um ativo retornados por um provider externo."""
+
+    ticker: str
+    name: str
+    sector: str | None = None
+    subsector: str | None = None
+    asset_type: str = "ACAO"
+    logo_url: str | None = None
+    source: str | None = None
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_ticker(cls, value: str) -> str:
+        return value.strip().upper()
+
+
+class BaseAssetInfoProvider(BaseProvider):
+    """Contrato para providers que retornam metadados de ativos."""
+
+    @abstractmethod
+    async def get_asset_info(self, ticker: str) -> AssetInfo:
+        """Retorna nome, setor e tipo de um ativo pelo ticker."""

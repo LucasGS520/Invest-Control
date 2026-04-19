@@ -20,6 +20,7 @@ class Transaction(Base):
     transaction_type: Mapped[str] = mapped_column(String(4), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    fees: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

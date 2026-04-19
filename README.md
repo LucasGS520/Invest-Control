@@ -1,83 +1,109 @@
 # InvestControl
 
-## Visão geral
-O repositório continha apenas o SRS do InvestControl. Como primeiro passo do desenvolvimento, foi criada a fundação técnica do MVP com a stack definida:
+Plataforma de apoio à decisão para investidores — fluxo centrado em transações, carteira simples e dados de mercado automáticos.
 
-- **Backend:** FastAPI
-- **Frontend:** Vue.js + Vite
-- **Banco de dados:** PostgreSQL
-- **Ambiente local:** Docker Compose
+## Stack
 
-Essa estrutura inicial permite iniciar o desenvolvimento incremental dos requisitos funcionais descritos no SRS, principalmente:
+| Camada | Tecnologia |
+|---|---|
+| Backend | FastAPI + SQLAlchemy (async) + Alembic |
+| Frontend | Vue 3 + Vite + Pinia |
+| Banco | PostgreSQL |
+| Ambiente local | Docker Compose |
 
-- autenticação e segurança;
-- gestão de carteiras, ativos e transações;
-- aporte sob demanda;
-- integração com dados de mercado.
+> Detalhes em [STACK_INVEST.md](STACK_INVEST.md)
 
-## Estrutura criada
+---
 
-```text
-backend/   API FastAPI e configuração inicial da aplicação
-frontend/  Aplicação Vue.js com tela inicial do MVP
-docker-compose.yml  Orquestra backend, frontend e PostgreSQL
-```
-
-## Decisões iniciais
-
-1. **Monorepo simples** para manter backend e frontend versionados juntos no MVP.
-2. **Endpoint de healthcheck** no backend para validar rapidamente ambiente, deploy e integrações futuras.
-3. **Tela inicial orientada ao produto** no frontend para traduzir o SRS em módulos visíveis desde o começo.
-4. **Variáveis de ambiente padronizadas** para facilitar evolução para autenticação, banco real e integrações externas.
-
-## Próximos passos sugeridos
-
-1. Implementar a modelagem inicial do domínio com usuários, carteiras, ativos e transações.
-2. Configurar SQLAlchemy + Alembic no backend.
-3. Definir contratos da API para autenticação e CRUD de carteira.
-4. Conectar o frontend aos endpoints iniciais do backend.
-5. Adicionar pipeline básico de testes e lint.
-
-## Como subir o ambiente
+## Subir o ambiente
 
 ```bash
 docker compose up --build
 ```
 
-Após iniciar os serviços:
+| Serviço | URL |
+|---|---|
+| API | http://localhost:8000 |
+| Swagger | http://localhost:8000/docs |
+| Frontend | http://localhost:5173 |
 
-- Backend: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
-- Frontend: `http://localhost:5173`
-- PostgreSQL: `localhost:5432`
+---
 
-## Observações
+## Fluxo principal
 
-Esta entrega representa o **passo inicial** de construção do sistema, transformando o SRS em uma base executável e pronta para a próxima iteração.
-## Integração de dados de mercado
+```
+Usuário cria carteira (nome + objetivo opcional)
+  └─ Registra transação (busca ticker → preenche qty/preço)
+       └─ Sistema cria/enriquece ativo automaticamente via fontes externas
+            └─ Posição e preço médio calculados automaticamente
+                 └─ Dashboard exibe patrimônio, retorno e proventos
+```
 
-O backend agora possui uma camada dedicada em `backend/app/integrations/market_data` para unificar cotações e proventos sem quebrar a API pública já usada pelo sistema.
+Não há cadastro manual de ativo. O usuário digita o ticker, o sistema resolve nome/setor/tipo via integração externa.
 
-- Cotações: prioridade configurável entre `yfinance`, `twelvedata` e `brapi`.
-- Dividendos: prioridade configurável entre `statusinvest`, `fundamentus` e `brapi`.
-- Persistência: dados continuam sendo gravados em `market_quotes` e `dividends`.
-- Compatibilidade: `app/services/market_data_service.py` segue expondo as mesmas funções principais.
-- Scheduler: `update_quotes` tenta caminho em lote antes do fallback unitário.
+---
 
-## Variáveis de ambiente de mercado
+## Arquitetura do backend
 
-Exemplos das variáveis novas estão em `backend/.env.example`.
+```
+app/
+  api/routes/          Endpoints FastAPI
+    portfolios.py      CRUD carteiras
+    transactions.py    Registrar/remover transações (recalcula posição)
+    assets.py          Legado — GET/POST de ativos
+    market.py          Cotações, DY, preço-teto, busca, detalhe de ativo
+  services/
+    portfolio_service.py    apply_transaction, recalculate_position, get_portfolio_summary
+    asset_service.py        get_or_create_asset, enrich_asset (enriquecimento automático)
+    market_data_service.py  Adapter público para integração de mercado
+    aporte_service.py       Recomendação de aporte
+  integrations/market_data/
+    aggregator.py      Orquestra fallback entre providers + circuit breaker
+    base.py            Contratos: Quote, DividendItem, AssetInfo
+    providers/         brapi, yfinance, twelvedata, statusinvest, fundamentus
+  tasks/
+    update_quotes.py   Scheduler APScheduler — atualiza cotações e dividendos
+  db/models/           SQLAlchemy ORM
+  alembic/versions/    Migrações incrementais
+```
 
-- `BRAPI_TOKEN`
-- `TWELVEDATA_API_KEY`
-- `TWELVEDATA_BASE_URL`
-- `PRICE_PROVIDERS_ORDER`
-- `DIVIDEND_PROVIDERS_ORDER`
-- `MARKET_DATA_CONCURRENCY`
-- `PROVIDER_TIMEOUTS_SECONDS`
+---
 
-## Limitações e pontos abertos
+## Variáveis de ambiente relevantes
 
-- `StatusInvest` e `Fundamentus` usam scraping HTML e podem exigir ajustes se a estrutura das páginas mudar.
-- O provider da `B3` foi deixado como stub documentado, pois pode depender de licenciamento e credenciais.
-- O cache principal segue baseado no banco relacional existente; cache distribuído permanece como melhoria futura.
+| Variável | Default | Descrição |
+|---|---|---|
+| `DATABASE_URL` | postgres local | Connection string PostgreSQL |
+| `BRAPI_TOKEN` | `""` | Token brapi.dev (opcional) |
+| `TWELVEDATA_API_KEY` | `""` | Chave Twelve Data (opcional) |
+| `MARKET_DATA_CACHE_MINUTES` | `15` | TTL cache de cotações |
+| `ASSET_METADATA_STALE_HOURS` | `24` | Validade de metadados de ativo |
+| `CIRCUIT_BREAKER_THRESHOLD` | `3` | Falhas antes de abrir o circuito |
+| `PRICE_PROVIDERS_ORDER` | `yfinance,twelvedata,brapi` | Ordem de fallback de cotações |
+
+---
+
+## Migrações
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+| Versão | Descrição |
+|---|---|
+| 0001 | Tabelas iniciais |
+| 0002 | Dados de mercado |
+| 0003 | Tabela de alertas |
+| 0004 | `objective`/`currency` em portfolios; `fees` em transactions |
+
+---
+
+## Testes
+
+```bash
+cd backend
+.venv/Scripts/python.exe -m pytest
+```
+
+Cobertura em: portfolios, transactions, aporte, market/aggregator, providers, alertas.

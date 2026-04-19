@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     twelvedata_api_key: str = ""
     twelvedata_base_url: str = "https://api.twelvedata.com"
     market_data_concurrency: int = 5
+    asset_metadata_stale_hours: int = 24
+    circuit_breaker_threshold: int = 3
+    circuit_breaker_reset_seconds: float = 60.0
     provider_timeouts_seconds: dict[str, float] = Field(
         default_factory=lambda: {
             "default": 10.0,

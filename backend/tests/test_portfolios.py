@@ -113,12 +113,10 @@ async def test_add_buy_transaction(client: AsyncClient):
         "/api/portfolios/", json={"name": "FIIs"}, headers={"Authorization": f"Bearer {token}"}
     )
     pid = portfolio.json()["id"]
-    asset = await _create_asset(client, token)
-
     resp = await client.post(
         f"/api/portfolios/{pid}/transactions",
         json={
-            "asset_id": asset["id"],
+            "ticker": "MXRF11",
             "transaction_type": "BUY",
             "quantity": 100,
             "price": "10.25",
@@ -138,12 +136,10 @@ async def test_portfolio_summary_after_buy(client: AsyncClient):
         "/api/portfolios/", json={"name": "FIIs"}, headers={"Authorization": f"Bearer {token}"}
     )
     pid = portfolio.json()["id"]
-    asset = await _create_asset(client, token)
-
     await client.post(
         f"/api/portfolios/{pid}/transactions",
         json={
-            "asset_id": asset["id"],
+            "ticker": "MXRF11",
             "transaction_type": "BUY",
             "quantity": 100,
             "price": "10.25",
@@ -169,19 +165,18 @@ async def test_avg_price_after_two_buys(client: AsyncClient):
         "/api/portfolios/", json={"name": "FIIs"}, headers={"Authorization": f"Bearer {token}"}
     )
     pid = portfolio.json()["id"]
-    asset = await _create_asset(client, token)
     headers = {"Authorization": f"Bearer {token}"}
 
     # Compra 1: 100 cotas a R$ 10,00
     await client.post(
         f"/api/portfolios/{pid}/transactions",
-        json={"asset_id": asset["id"], "transaction_type": "BUY", "quantity": 100, "price": "10.00", "date": "2026-03-01"},
+        json={"ticker": "MXRF11", "transaction_type": "BUY", "quantity": 100, "price": "10.00", "date": "2026-03-01"},
         headers=headers,
     )
     # Compra 2: 100 cotas a R$ 11,00
     await client.post(
         f"/api/portfolios/{pid}/transactions",
-        json={"asset_id": asset["id"], "transaction_type": "BUY", "quantity": 100, "price": "11.00", "date": "2026-03-10"},
+        json={"ticker": "MXRF11", "transaction_type": "BUY", "quantity": 100, "price": "11.00", "date": "2026-03-10"},
         headers=headers,
     )
 
@@ -199,17 +194,16 @@ async def test_sell_reduces_quantity(client: AsyncClient):
         "/api/portfolios/", json={"name": "FIIs"}, headers={"Authorization": f"Bearer {token}"}
     )
     pid = portfolio.json()["id"]
-    asset = await _create_asset(client, token)
     headers = {"Authorization": f"Bearer {token}"}
 
     await client.post(
         f"/api/portfolios/{pid}/transactions",
-        json={"asset_id": asset["id"], "transaction_type": "BUY", "quantity": 100, "price": "10.00", "date": "2026-03-01"},
+        json={"ticker": "MXRF11", "transaction_type": "BUY", "quantity": 100, "price": "10.00", "date": "2026-03-01"},
         headers=headers,
     )
     resp = await client.post(
         f"/api/portfolios/{pid}/transactions",
-        json={"asset_id": asset["id"], "transaction_type": "SELL", "quantity": 30, "price": "11.00", "date": "2026-03-15"},
+        json={"ticker": "MXRF11", "transaction_type": "SELL", "quantity": 30, "price": "11.00", "date": "2026-03-15"},
         headers=headers,
     )
     assert resp.status_code == 201

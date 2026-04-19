@@ -6,6 +6,8 @@ export interface Portfolio {
   id: number
   name: string
   description: string | null
+  objective: string | null
+  currency: string
   created_at: string
 }
 
@@ -23,7 +25,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     }
   }
 
-  async function createPortfolio(payload: { name: string; description?: string }) {
+  async function createPortfolio(payload: { name: string; description?: string; objective?: string }) {
     const { data } = await axios.post('/api/portfolios/', payload)
     portfolios.value.push(data)
     return data as Portfolio

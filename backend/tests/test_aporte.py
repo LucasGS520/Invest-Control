@@ -71,12 +71,12 @@ async def _create_asset(client: AsyncClient, token: str, ticker: str = "MXRF11")
 
 
 async def _add_transaction(
-    client: AsyncClient, token: str, portfolio_id: int, asset_id: int, qty: int = 10, price: float = 10.0
+    client: AsyncClient, token: str, portfolio_id: int, ticker: str, qty: int = 10, price: float = 10.0
 ) -> None:
     resp = await client.post(
         f"/api/portfolios/{portfolio_id}/transactions",
         json={
-            "asset_id": asset_id,
+            "ticker": ticker,
             "transaction_type": "BUY",
             "quantity": qty,
             "price": price,
@@ -216,8 +216,7 @@ async def test_recommend_with_position_no_quote(client: AsyncClient):
     """Carteira com posição mas sem cotação: retorna recomendação com qty=0 e limitação."""
     token = await _register_and_token(client)
     pid = await _create_portfolio(client, token)
-    aid = await _create_asset(client, token)
-    await _add_transaction(client, token, pid, aid, qty=10, price=10.0)
+    await _add_transaction(client, token, pid, "MXRF11", qty=10, price=10.0)
 
     resp = await client.post(
         "/api/aporte/recommend",
@@ -239,8 +238,7 @@ async def test_recommend_with_quote_calculates_quantity(client: AsyncClient, db_
     """Com cotação disponível, calcula quantidade máxima comprável."""
     token = await _register_and_token(client)
     pid = await _create_portfolio(client, token)
-    aid = await _create_asset(client, token)
-    await _add_transaction(client, token, pid, aid, qty=10, price=10.0)
+    await _add_transaction(client, token, pid, "MXRF11", qty=10, price=10.0)
 
     # Insere cotação diretamente no banco
     quote = MarketQuote(ticker="MXRF11", price=Decimal("10.00"))
@@ -268,8 +266,7 @@ async def test_recommend_max_assets_limit(client: AsyncClient, db_session: Async
 
     tickers = ["MXRF11", "HGLG11", "XPML11"]
     for ticker in tickers:
-        aid = await _create_asset(client, token, ticker=ticker)
-        await _add_transaction(client, token, pid, aid, qty=5, price=10.0)
+        await _add_transaction(client, token, pid, ticker, qty=5, price=10.0)
 
     resp = await client.post(
         "/api/aporte/recommend",
@@ -307,8 +304,7 @@ async def test_recommend_score_includes_justifications(client: AsyncClient, db_s
     """Recomendação com dados suficientes inclui justificativas."""
     token = await _register_and_token(client)
     pid = await _create_portfolio(client, token)
-    aid = await _create_asset(client, token)
-    await _add_transaction(client, token, pid, aid, qty=10, price=10.0)
+    await _add_transaction(client, token, pid, "MXRF11", qty=10, price=10.0)
 
     # Cotação abaixo do teto calculável
     quote = MarketQuote(ticker="MXRF11", price=Decimal("9.00"))

@@ -16,57 +16,60 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Objetivo e Problemas a ser Resolvido
+## Fluxo Oficial (implementado)
 
-**Objetivo:** adicionar uma camada de integração/aggregaçao de fontes externas de dados de mercado dentro de `app/` para unificar cotações, dividendos e dados estruturais, usando as fontes escolhidas (yfinance, Twelve Data, StatusInvest, Fundamentus, B3), mantendo compatibilidade com a API já usada por `app/services/market_data_service.py` e por `app/tasks/update_quotes.py`.
+O alinhamento transaction-first foi concluído em 6 fases. O fluxo oficial é:
 
-- **Estratégia de Execução:** criar modelos unificados (Pydantic) para `Quote` e `DividendItem`; implementar providers concretos (yfinance, Twelve Data, StatusInvest, Fundamentus, B3); implementar agregador que:
-  - tenta providers por ordem configurada;
-  - usa fetch em lote quando disponível;
-  - persiste resultados nos modelos existentes (`MarketQuote`, `Dividend`);
-  - exporta mesma superfície que `market_data_service` (compatibilidade).
+```
+Carteira (nome + objetivo opcional)
+  └─ Registrar transação → busca ticker → sistema resolve ativo automaticamente
+       └─ Posição, preço médio e retorno calculados automaticamente
+            └─ Dashboard: patrimônio, variação, proventos, Descobrir
+```
 
-- **Premissas**
-  - Banco PostgreSQL já disponível (como no projeto).
-  - Scheduler continuará chamando `market_data_service.get_quote` e `sync_dividends` (assinaturas existentes).
-  - A aplicação tem acesso à internet para consultar provedores.
-  - Chaves de API (Twelve Data, B3 quando necessário) serão fornecidas via variáveis de ambiente.
+**Contratos centrais:**
+- `POST /portfolios/{id}/transactions` → `{ ticker, transaction_type, quantity, price, fees?, date }`
+- `DELETE /portfolios/{id}/transactions/{tx_id}` → recalcula posição por replay
+- `GET /market/search?q=` → busca ativo local com cotação do cache
+- `GET /market/asset/{ticker}` → detalhe com contexto do usuário
+- `GET /portfolios/{id}` → posições com `current_price`, `return_pct`, `change_percent`
 
----
-
-## Análise de Riscos e Decisões Chave
-
-**Decisões Técnicas Principais**
-  - **Prioridade de fontes (configurável):** price → [yfinance, Twelve Data, brapi], dividends → [StatusInvest, Fundamentus, brapi]; B3 para dados estruturais/metadata. Ordem definida via `core.config`.
-  - **Contrato unificado:** providers retornam objetos tipados (`Quote`, `DividendItem`) e agregador persiste em `MarketQuote`/`Dividend`.
-  - **Compatibilidade:** manter `app/services/market_data_service.py` com mesmas funções públicas (`get_quote(db, ticker)`, `sync_dividends(db, ticker)`) — refatorado como adapter.
-  - **Assincronia:** código principal em async; providers síncronos (yfinance) executam via `asyncio.to_thread`.
-  - **Cache primário:** usar as tabelas já existentes como cache (evitar introduzir Redis inicialmente). Redis opcional como tarefa futura.
-  - **Batch fetching:** onde disponível (Twelve Data, brapi, yfinance Tickers), usar chamadas em lote para eficiência na `update_quotes`.
-  - **Rate limiting & backoff:** cada provider com timeout curto + retries exponenciais e circuit-breaker simples por provider.
-
-- **Riscos Principais**
-  - Scraping (StatusInvest/Fundamentus) fragiliza com mudanças de HTML.
-  - Licenciamento/disponibilidade da B3.
-  - Rate limits / bloqueios por provedores (yahoo/TwelveData).
-  - Inconsistência de mapeamento de tickers entre fontes (BR vs. US suffixes).
-  - Aumento de latência na `update_quotes` se não usar batch/concorrência controlada.
-
-- **Dependências**
-  - Runtime: `yfinance`, `pandas`, `twelvedata` (ou httpx), `beautifulsoup4`, `lxml`, `httpx` (já presente), opcional `aioredis` (cache).
-  - Infra/ops: variáveis de ambiente para chaves (`TWELVEDATA_API_KEY`, possivelmente `B3_API_KEY`), internet outbound.
-
-- **Impactos Arquiteturais**
-  - Novo package `backend/app/integrations/market_data` — isolado da lógica de serviço.
-  - Imagem Docker maior (pandas, lxml).
-  - Latência de atualização aumenta sem batch; `tasks/update_quotes.py` deve usar batches e limite de concorrência.
-  - Observabilidade requerida: logs e métricas por provider.
+**Pontos em aberto:**
+- Ticker normalization para sufixos BR/US (`.SA` em yfinance/twelvedata)
+- SLA de atualização por tipo de ativo
+- Edição de transação com trilha de auditoria (atualmente: delete + recriar)
+- Snapshot/materialização periódica de posição
 
 ---
 
-### Resultado Esperado
+### Resumo do Problema e Objetivo da Correção
+- **Problema:** O sistema mantém módulos de Calendário e Relatórios que desviam do fluxo principal transaction-first e aumentam complexidade funcional/técnica sem aderência ao objetivo atual do produto.
 
-- Nova pasta `backend/app/integrations/market_data` com interfaces e providers, um `MarketDataAggregator` configurável (ordem de prioridade + fallback), adaptação mínima de `app/services/market_data_service.py` para delegar ao agregador sem mudar assinaturas públicas, testes e documentação atualizados.
+- **Sintoma observado:** Há rotas, serviços, telas, navegação e testes dedicados a essas duas frentes, com acoplamento no dashboard e no bootstrap da API.
+
+- **Objetivo da correção:** Remover completamente páginas, endpoints e componentes de Calendário e Relatórios, preservando estabilidade do fluxo principal (carteiras, transações, mercado e alertas).
+
+- **Premissas:**
+- O objetivo de produto validado é priorizar carteira + transações + posição + preço médio + desempenho.
+- APIs consumidoras externas para calendário/relatórios não devem ser mantidas.
+- O dashboard pode perder blocos não essenciais desde que permaneça funcional e sem erro.
+
+---
+
+### Riscos, Impacto e Decisões
+- **Decisão Técnica Principal:** Remoção física do código (não apenas ocultar menu), com limpeza de imports e contratos para eliminar dívida técnica e evitar rotas órfãs.
+
+- **Risco Principal:** Quebra de dashboard e navegação por dependência direta de chamadas para /api/reports e /api/calendar, causando erro em runtime se não houver desacoplamento simultâneo.
+
+- **Impacto atual:** Complexidade desnecessária em backend, frontend e suíte de testes; manutenção dispersa fora do foco do produto.
+
+- **Dependências:**
+- Bootstrap de API em main.py, main.py, main.py, main.py.
+- Rotas dedicadas em calendar.py e reports.py.
+- Serviço/schema de relatórios em reports_service.py e reports.py.
+- Schema de calendário em calendar.py.
+- Frontend: roteador index.ts, index.ts, menu App.vue, dashboard DashboardView.vue.
+- Testes dedicados: test_calendar.py e test_reports.py.
 
 ---
 

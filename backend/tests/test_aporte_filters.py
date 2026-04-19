@@ -24,27 +24,11 @@ async def _setup_mixed_portfolio(client: AsyncClient, token: str) -> int:
     )
     pid = resp_p.json()["id"]
 
-    # FII
-    resp_fii = await client.post(
-        "/api/assets/",
-        json={"ticker": "MXRF11", "name": "Maxi Renda", "asset_type": "FII"},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    aid_fii = resp_fii.json()["id"]
-
-    # ACAO
-    resp_acao = await client.post(
-        "/api/assets/",
-        json={"ticker": "ITUB4", "name": "Itau Unibanco", "asset_type": "ACAO"},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    aid_acao = resp_acao.json()["id"]
-
-    for aid in [aid_fii, aid_acao]:
+    for ticker in ["MXRF11", "ITUB4"]:
         await client.post(
             f"/api/portfolios/{pid}/transactions",
             json={
-                "asset_id": aid,
+                "ticker": ticker,
                 "transaction_type": "BUY",
                 "quantity": 10,
                 "price": 10.0,

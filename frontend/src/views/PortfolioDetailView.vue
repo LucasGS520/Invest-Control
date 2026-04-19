@@ -5,14 +5,6 @@ import axios from 'axios'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
-interface Asset {
-  id: number
-  ticker: string
-  name: string
-  asset_type: string
-  sector: string | null
-}
-
 interface PositionOut {
   id: number
   asset_id: number
@@ -21,12 +13,18 @@ interface PositionOut {
   asset_type: string
   quantity: number
   avg_price: number
+  current_price: number | null
+  current_value: number | null
+  return_pct: number | null
+  change_percent: number | null
 }
 
 interface PortfolioSummary {
   id: number
   name: string
   description: string | null
+  objective: string | null
+  currency: string
   created_at: string
   total_invested: number
   positions: PositionOut[]
@@ -39,8 +37,18 @@ interface TransactionOut {
   transaction_type: string
   quantity: number
   price: number
+  fees: number | null
   date: string
   notes: string | null
+}
+
+interface AssetSearchResult {
+  ticker: string
+  name: string
+  sector: string | null
+  asset_type: string
+  price: number | null
+  change_percent: number | null
 }
 
 // ── Estado ─────────────────────────────────────────────────────────────────
@@ -50,40 +58,41 @@ const portfolioId = Number(route.params.id)
 
 const summary = ref<PortfolioSummary | null>(null)
 const transactions = ref<TransactionOut[]>([])
-const assets = ref<Asset[]>([])
 
 const loading = ref(true)
 const error = ref('')
 const activeTab = ref<'positions' | 'transactions' | 'add'>('positions')
 
+// Busca de ativo
+const tickerQuery = ref('')
+const suggestions = ref<AssetSearchResult[]>([])
+const selectedAsset = ref<AssetSearchResult | null>(null)
+const searchLoading = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
 // Form nova transação
-const txAssetId = ref<number | ''>('')
 const txType = ref<'BUY' | 'SELL'>('BUY')
 const txQty = ref<number | ''>('')
 const txPrice = ref<number | ''>('')
+const txFees = ref<number | ''>('')
 const txDate = ref(new Date().toISOString().slice(0, 10))
 const txNotes = ref('')
 const txLoading = ref(false)
 const txError = ref('')
 const txSuccess = ref('')
 
-// Form cadastro de ativo
-const newTicker = ref('')
-const newAssetName = ref('')
-const newAssetType = ref<'FII' | 'ACAO'>('FII')
-const newSector = ref('')
-const assetLoading = ref(false)
-const assetError = ref('')
-const assetSuccess = ref('')
-
 onMounted(async () => {
-  await Promise.all([loadSummary(), loadTransactions(), loadAssets()])
+  await Promise.all([loadSummary(), loadTransactions()])
 })
 
 // ── Computed ─────────────────────────────────────────────────────────────────
 
 const activePositions = computed(() =>
   (summary.value?.positions ?? []).filter((p) => p.quantity > 0),
+)
+
+const totalCurrentValue = computed(() =>
+  activePositions.value.reduce((sum, p) => sum + (p.current_value ?? p.quantity * p.avg_price), 0),
 )
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -94,6 +103,11 @@ function fmt(val: number, d = 2): string {
 
 function fmtDate(iso: string): string {
   return new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR')
+}
+
+function retColor(val: number | null): string {
+  if (val === null) return ''
+  return val >= 0 ? 'positive' : 'negative'
 }
 
 // ── Ações ────────────────────────────────────────────────────────────────────
@@ -119,36 +133,66 @@ async function loadTransactions() {
   }
 }
 
-async function loadAssets() {
-  try {
-    const { data } = await axios.get('/api/assets/')
-    assets.value = data
-  } catch {
-    // silently ignore
+function onTickerInput() {
+  selectedAsset.value = null
+  if (searchTimer) clearTimeout(searchTimer)
+  if (tickerQuery.value.trim().length < 2) {
+    suggestions.value = []
+    return
   }
+  searchTimer = setTimeout(searchAssets, 300)
+}
+
+async function searchAssets() {
+  searchLoading.value = true
+  try {
+    const { data } = await axios.get('/api/market/search', { params: { q: tickerQuery.value.trim() } })
+    suggestions.value = data
+  } catch {
+    suggestions.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+function selectAsset(asset: AssetSearchResult) {
+  selectedAsset.value = asset
+  tickerQuery.value = asset.ticker
+  if (asset.price) txPrice.value = asset.price
+  suggestions.value = []
+}
+
+function clearAsset() {
+  selectedAsset.value = null
+  tickerQuery.value = ''
+  txPrice.value = ''
+  suggestions.value = []
 }
 
 async function submitTransaction() {
   txError.value = ''
   txSuccess.value = ''
-  if (!txAssetId.value || !txQty.value || !txPrice.value) {
-    txError.value = 'Preencha todos os campos obrigatórios.'
+  const ticker = selectedAsset.value?.ticker || tickerQuery.value.trim().toUpperCase()
+  if (!ticker || !txQty.value || !txPrice.value) {
+    txError.value = 'Informe o ativo, quantidade e preço.'
     return
   }
   txLoading.value = true
   try {
     await axios.post(`/api/portfolios/${portfolioId}/transactions`, {
-      asset_id: txAssetId.value,
+      ticker,
       transaction_type: txType.value,
       quantity: txQty.value,
       price: txPrice.value,
+      fees: txFees.value || null,
       date: txDate.value,
       notes: txNotes.value || null,
     })
-    txSuccess.value = 'Transação registrada com sucesso!'
+    txSuccess.value = 'Transação registrada!'
     txQty.value = ''
-    txPrice.value = ''
+    txFees.value = ''
     txNotes.value = ''
+    clearAsset()
     await Promise.all([loadSummary(), loadTransactions()])
     setTimeout(() => (txSuccess.value = ''), 3000)
   } catch (err: unknown) {
@@ -156,35 +200,6 @@ async function submitTransaction() {
     txError.value = e.response?.data?.detail || 'Erro ao registrar transação.'
   } finally {
     txLoading.value = false
-  }
-}
-
-async function createAsset() {
-  assetError.value = ''
-  assetSuccess.value = ''
-  if (!newTicker.value.trim() || !newAssetName.value.trim()) {
-    assetError.value = 'Preencha ticker e nome do ativo.'
-    return
-  }
-  assetLoading.value = true
-  try {
-    const { data } = await axios.post('/api/assets/', {
-      ticker: newTicker.value.toUpperCase().trim(),
-      name: newAssetName.value.trim(),
-      asset_type: newAssetType.value,
-      sector: newSector.value.trim() || null,
-    })
-    assets.value.push(data)
-    assetSuccess.value = `Ativo ${data.ticker} cadastrado!`
-    newTicker.value = ''
-    newAssetName.value = ''
-    newSector.value = ''
-    setTimeout(() => (assetSuccess.value = ''), 3000)
-  } catch (err: unknown) {
-    const e = err as { response?: { data?: { detail?: string } } }
-    assetError.value = e.response?.data?.detail || 'Erro ao cadastrar ativo.'
-  } finally {
-    assetLoading.value = false
   }
 }
 </script>
@@ -200,6 +215,7 @@ async function createAsset() {
         <div>
           <h2>{{ summary.name }}</h2>
           <p v-if="summary.description" class="portfolio-desc">{{ summary.description }}</p>
+          <p v-if="summary.objective" class="portfolio-objective">🎯 {{ summary.objective }}</p>
         </div>
         <div class="kpi-mini">
           <div class="kpi-mini-card">
@@ -207,7 +223,11 @@ async function createAsset() {
             <span class="kpi-mini-value">R$ {{ fmt(summary.total_invested) }}</span>
           </div>
           <div class="kpi-mini-card">
-            <span class="kpi-mini-label">Posições ativas</span>
+            <span class="kpi-mini-label">Valor atual</span>
+            <span class="kpi-mini-value">R$ {{ fmt(totalCurrentValue) }}</span>
+          </div>
+          <div class="kpi-mini-card">
+            <span class="kpi-mini-label">Posições</span>
             <span class="kpi-mini-value">{{ activePositions.length }}</span>
           </div>
         </div>
@@ -238,8 +258,11 @@ async function createAsset() {
                 <th>Ativo</th>
                 <th>Tipo</th>
                 <th class="num">Qtd</th>
-                <th class="num">Preço médio</th>
-                <th class="num">Total investido</th>
+                <th class="num">PM</th>
+                <th class="num">Preço atual</th>
+                <th class="num">Valor atual</th>
+                <th class="num">Retorno</th>
+                <th class="num">Var. dia</th>
               </tr>
             </thead>
             <tbody>
@@ -255,7 +278,14 @@ async function createAsset() {
                 </td>
                 <td class="num">{{ pos.quantity }}</td>
                 <td class="num">R$ {{ fmt(pos.avg_price) }}</td>
-                <td class="num">R$ {{ fmt(pos.quantity * pos.avg_price) }}</td>
+                <td class="num">{{ pos.current_price != null ? 'R$ ' + fmt(pos.current_price) : '—' }}</td>
+                <td class="num">{{ pos.current_value != null ? 'R$ ' + fmt(pos.current_value) : '—' }}</td>
+                <td class="num" :class="retColor(pos.return_pct)">
+                  {{ pos.return_pct != null ? (pos.return_pct >= 0 ? '+' : '') + fmt(pos.return_pct) + '%' : '—' }}
+                </td>
+                <td class="num" :class="retColor(pos.change_percent)">
+                  {{ pos.change_percent != null ? (pos.change_percent >= 0 ? '+' : '') + fmt(pos.change_percent) + '%' : '—' }}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -301,41 +331,81 @@ async function createAsset() {
 
       <!-- ── TAB: Registrar ─────────────────────────────────────────── -->
       <div v-if="activeTab === 'add'" class="add-section">
-        <!-- Registrar transação ───────────────────────────────────────── -->
         <div class="form-card">
           <h3>Registrar Transação</h3>
 
-          <div class="form-row-3">
+          <!-- Busca de ativo ─────────────────────────────────────────── -->
+          <div class="ticker-search-wrap">
             <label class="form-field">
-              Ativo
-              <select v-model="txAssetId" required>
-                <option value="" disabled>Selecione</option>
-                <option v-for="a in assets" :key="a.id" :value="a.id">
-                  {{ a.ticker }} — {{ a.name }}
-                </option>
-              </select>
+              Ativo (ticker ou nome)
+              <div class="ticker-input-row">
+                <input
+                  v-model="tickerQuery"
+                  type="text"
+                  placeholder="ex: MXRF11 ou Maxi Renda"
+                  maxlength="30"
+                  autocomplete="off"
+                  @input="onTickerInput"
+                />
+                <button v-if="tickerQuery" class="btn-clear" @click="clearAsset">✕</button>
+              </div>
             </label>
+
+            <!-- Sugestões ───────────────────────────────────────────── -->
+            <div v-if="suggestions.length > 0" class="suggestions-list">
+              <div
+                v-for="s in suggestions"
+                :key="s.ticker"
+                class="suggestion-item"
+                @click="selectAsset(s)"
+              >
+                <span class="sug-ticker">{{ s.ticker }}</span>
+                <span class="sug-name">{{ s.name }}</span>
+                <span v-if="s.price" class="sug-price">R$ {{ fmt(s.price) }}</span>
+              </div>
+            </div>
+            <div v-if="searchLoading" class="search-hint">Buscando...</div>
+
+            <!-- Preview do ativo selecionado ───────────────────────── -->
+            <div v-if="selectedAsset" class="asset-preview">
+              <span class="type-badge" :class="selectedAsset.asset_type.toLowerCase()">{{ selectedAsset.asset_type }}</span>
+              <span class="preview-name">{{ selectedAsset.name }}</span>
+              <span v-if="selectedAsset.sector" class="preview-sector">{{ selectedAsset.sector }}</span>
+              <span v-if="selectedAsset.price" class="preview-price">
+                R$ {{ fmt(selectedAsset.price) }}
+                <span v-if="selectedAsset.change_percent" :class="retColor(selectedAsset.change_percent)">
+                  ({{ selectedAsset.change_percent >= 0 ? '+' : '' }}{{ fmt(selectedAsset.change_percent) }}%)
+                </span>
+              </span>
+            </div>
+          </div>
+
+          <div class="form-row-3">
             <label class="form-field">
               Tipo
               <select v-model="txType">
-                <option value="BUY">Compra (BUY)</option>
-                <option value="SELL">Venda (SELL)</option>
+                <option value="BUY">Compra</option>
+                <option value="SELL">Venda</option>
               </select>
             </label>
             <label class="form-field">
               Data
               <input v-model="txDate" type="date" />
             </label>
-          </div>
-
-          <div class="form-row">
             <label class="form-field">
               Quantidade
               <input v-model.number="txQty" type="number" min="1" placeholder="ex: 100" />
             </label>
+          </div>
+
+          <div class="form-row">
             <label class="form-field">
               Preço unitário (R$)
-              <input v-model.number="txPrice" type="number" min="0.01" step="0.01" placeholder="ex: 10.50" />
+              <input v-model.number="txPrice" type="number" min="0.0001" step="0.01" placeholder="ex: 10.50" />
+            </label>
+            <label class="form-field">
+              Custos/taxas (R$, opcional)
+              <input v-model.number="txFees" type="number" min="0" step="0.01" placeholder="ex: 0.50" />
             </label>
             <label class="form-field">
               Notas (opcional)
@@ -348,42 +418,6 @@ async function createAsset() {
 
           <button class="btn-primary" :disabled="txLoading" @click="submitTransaction">
             {{ txLoading ? 'Registrando...' : 'Registrar Transação' }}
-          </button>
-        </div>
-
-        <!-- Cadastrar ativo ────────────────────────────────────────────── -->
-        <div class="form-card">
-          <h3>Cadastrar Novo Ativo</h3>
-
-          <div class="form-row">
-            <label class="form-field">
-              Ticker
-              <input v-model="newTicker" type="text" placeholder="ex: MXRF11" maxlength="20" />
-            </label>
-            <label class="form-field">
-              Nome
-              <input v-model="newAssetName" type="text" placeholder="Nome do ativo" />
-            </label>
-          </div>
-          <div class="form-row">
-            <label class="form-field">
-              Tipo
-              <select v-model="newAssetType">
-                <option value="FII">FII</option>
-                <option value="ACAO">AÇÃO</option>
-              </select>
-            </label>
-            <label class="form-field">
-              Setor (opcional)
-              <input v-model="newSector" type="text" placeholder="ex: Logística" />
-            </label>
-          </div>
-
-          <p v-if="assetError" class="form-error">{{ assetError }}</p>
-          <p v-if="assetSuccess" class="form-success">{{ assetSuccess }}</p>
-
-          <button class="btn-secondary" :disabled="assetLoading" @click="createAsset">
-            {{ assetLoading ? 'Salvando...' : 'Cadastrar Ativo' }}
           </button>
         </div>
       </div>
@@ -607,4 +641,81 @@ async function createAsset() {
 
 .btn-secondary:hover:not(:disabled) { background: rgba(59, 130, 246, 0.2); }
 .btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ── Retorno positivo/negativo ─────────────────────────────────────────── */
+.positive { color: #86efac; }
+.negative { color: #fca5a5; }
+
+.portfolio-objective { margin: 2px 0 0; font-size: 0.82rem; color: #7dd3fc; }
+
+/* ── Busca de ticker ────────────────────────────────────────────────────── */
+.ticker-search-wrap { margin-bottom: 16px; position: relative; }
+
+.ticker-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ticker-input-row input { flex: 1; }
+
+.btn-clear {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.btn-clear:hover { color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
+
+.suggestions-list {
+  position: absolute;
+  z-index: 100;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.suggestion-item:hover { background: rgba(59, 130, 246, 0.1); }
+
+.sug-ticker { font-weight: 700; color: #93c5fd; min-width: 70px; }
+.sug-name { flex: 1; font-size: 0.85rem; color: #94a3b8; }
+.sug-price { font-size: 0.85rem; color: #e5eefc; }
+
+.search-hint { font-size: 0.8rem; color: #64748b; padding: 6px 0; }
+
+.asset-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(59, 130, 246, 0.07);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.preview-name { font-weight: 600; color: #e5eefc; }
+.preview-sector { font-size: 0.8rem; color: #64748b; }
+.preview-price { font-size: 0.9rem; color: #e5eefc; margin-left: auto; }
 </style>

@@ -9,7 +9,7 @@ from decimal import Decimal
 import httpx
 
 from app.core.config import settings
-from app.integrations.market_data.base import BaseDividendProvider, BasePriceProvider, DividendItem, Quote
+from app.integrations.market_data.base import AssetInfo, BaseAssetInfoProvider, BaseDividendProvider, BasePriceProvider, DividendItem, Quote
 
 _BRAPI_BASE = "https://brapi.dev/api"
 
@@ -25,7 +25,7 @@ def _normalize_dividend_type(label: str) -> str:
     return "DIVIDENDO"
 
 
-class BrapiProvider(BasePriceProvider, BaseDividendProvider):
+class BrapiProvider(BasePriceProvider, BaseDividendProvider, BaseAssetInfoProvider):
     """Reaproveita a semantica atual da brapi como provider plugavel."""
 
     provider_name = "brapi"
@@ -95,6 +95,24 @@ class BrapiProvider(BasePriceProvider, BaseDividendProvider):
                 )
             )
         return items
+
+    async def get_asset_info(self, ticker: str) -> AssetInfo:
+        url = f"{_BRAPI_BASE}/quote/{ticker.upper()}"
+        payload = await self._request_json(url, headers=self._headers())
+        results = payload.get("results", [])
+        if not results:
+            raise ValueError(f"Ticker '{ticker}' nao encontrado na brapi.")
+        item = results[0]
+        ticker_str = (item.get("symbol") or ticker).upper()
+        name = item.get("longName") or item.get("shortName") or ticker_str
+        asset_type = "FII" if ticker_str.endswith("11") else "ACAO"
+        return AssetInfo(
+            ticker=ticker_str,
+            name=name,
+            sector=item.get("sector"),
+            asset_type=asset_type,
+            source=self.provider_name,
+        )
 
     async def _request_json(self, url: str, **kwargs) -> dict:
         last_error: Exception | None = None

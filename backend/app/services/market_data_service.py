@@ -58,6 +58,19 @@ async def sync_dividends(db: AsyncSession, ticker: str) -> list[Dividend]:
     return await market_data_aggregator.sync_dividends(db, ticker)
 
 
+async def enrich_asset_metadata(db: AsyncSession, ticker: str) -> None:
+    """Busca metadados externos e atualiza o registro do ativo se necessário."""
+    from sqlalchemy import select
+
+    from app.db.models.asset import Asset
+    from app.services.asset_service import enrich_asset
+
+    result = await db.execute(select(Asset).where(Asset.ticker == ticker.upper()))
+    asset = result.scalar_one_or_none()
+    if asset is not None:
+        await enrich_asset(db, asset)
+
+
 async def get_dividends(db: AsyncSession, ticker: str) -> list[Dividend]:
     """Retorna proventos persistidos, sincronizando se necessario."""
 

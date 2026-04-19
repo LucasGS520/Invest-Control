@@ -7,35 +7,10 @@ import { useAuthStore } from '@/stores/auth'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
-interface DividendEvent {
-  ticker: string
-  asset_name: string | null
-  value: number
-  ex_date: string
-  days_until_ex: number
-  dividend_type: string
-}
-
-interface ProjectionReport {
-  projected_monthly_income: number
-  projected_annual_income: number
-  avg_dy: number | null
-}
-
-interface PerformanceReport {
-  total_invested: number
-  current_value: number
-  total_return_pct: number | null
-}
-
 interface KPIs {
   total_invested: number
   current_value: number
   return_pct: number | null
-  monthly_income: number
-  annual_income: number
-  avg_dy: number | null
-  upcoming_count: number
 }
 
 // ── Estado ─────────────────────────────────────────────────────────────────
@@ -45,7 +20,6 @@ const portfolioStore = usePortfolioStore()
 const auth = useAuthStore()
 
 const kpis = ref<KPIs | null>(null)
-const upcoming = ref<DividendEvent[]>([])
 const loading = ref(true)
 
 onMounted(async () => {
@@ -62,31 +36,15 @@ onMounted(async () => {
 async function loadKPIs(pid: number) {
   loading.value = true
   try {
-    const [perfRes, projRes, calRes] = await Promise.allSettled([
-      axios.get('/api/reports/performance', { params: { portfolio_id: pid } }),
-      axios.get('/api/reports/projections', { params: { portfolio_id: pid } }),
-      axios.get('/api/calendar/dividends', { params: { portfolio_id: pid, upcoming_days: 30 } }),
-    ])
-
-    const perf: PerformanceReport | null =
-      perfRes.status === 'fulfilled' ? perfRes.value.data : null
-    const proj: ProjectionReport | null =
-      projRes.status === 'fulfilled' ? projRes.value.data : null
-    const cal = calRes.status === 'fulfilled' ? calRes.value.data : null
-
-    if (cal?.upcoming_events) {
-      upcoming.value = cal.upcoming_events.slice(0, 5)
-    }
-
-    kpis.value = {
-      total_invested: perf?.total_invested ?? 0,
-      current_value: perf?.current_value ?? 0,
-      return_pct: perf?.total_return_pct ?? null,
-      monthly_income: proj?.projected_monthly_income ?? 0,
-      annual_income: proj?.projected_annual_income ?? 0,
-      avg_dy: proj?.avg_dy ?? null,
-      upcoming_count: cal?.upcoming_events?.length ?? 0,
-    }
+    const { data } = await axios.get(`/api/portfolios/${pid}`)
+    const positions: { current_value: number | null; avg_price: number; quantity: number }[] = data.positions ?? []
+    const totalInvested = Number(data.total_invested ?? 0)
+    const currentValue = positions.reduce(
+      (sum, p) => sum + Number(p.current_value ?? p.avg_price * p.quantity),
+      0,
+    )
+    const returnPct = totalInvested > 0 ? ((currentValue - totalInvested) / totalInvested) * 100 : null
+    kpis.value = { total_invested: totalInvested, current_value: currentValue, return_pct: returnPct }
   } finally {
     loading.value = false
   }
@@ -103,14 +61,66 @@ function returnClass(val: number | null): string {
   return val >= 0 ? 'positive' : 'negative'
 }
 
-function urgencyClass(days: number): string {
-  if (days <= 7) return 'urgent'
-  if (days <= 14) return 'soon'
-  return ''
+// ── Descobrir ────────────────────────────────────────────────────────────────
+
+interface AssetSearchResult {
+  ticker: string
+  name: string
+  sector: string | null
+  asset_type: string
+  price: number | null
+  change_percent: number | null
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR')
+interface AssetDetailOut {
+  ticker: string
+  name: string
+  sector: string | null
+  asset_type: string
+  price: number | null
+  change_percent: number | null
+  volume: number | null
+  positions: { portfolio_id: number; portfolio_name: string; quantity: number; avg_price: number; current_value: number | null; return_pct: number | null }[]
+  total_dividends_received: number | null
+}
+
+const discoverQuery = ref('')
+const discoverSuggestions = ref<AssetSearchResult[]>([])
+const discoverLoading = ref(false)
+const discoverDetail = ref<AssetDetailOut | null>(null)
+let discoverTimer: ReturnType<typeof setTimeout> | null = null
+
+function onDiscoverInput() {
+  discoverDetail.value = null
+  if (discoverTimer) clearTimeout(discoverTimer)
+  if (discoverQuery.value.trim().length < 2) {
+    discoverSuggestions.value = []
+    return
+  }
+  discoverTimer = setTimeout(searchDiscover, 300)
+}
+
+async function searchDiscover() {
+  discoverLoading.value = true
+  try {
+    const { data } = await axios.get('/api/market/search', { params: { q: discoverQuery.value.trim() } })
+    discoverSuggestions.value = data
+  } catch {
+    discoverSuggestions.value = []
+  } finally {
+    discoverLoading.value = false
+  }
+}
+
+async function loadAssetDetail(ticker: string) {
+  discoverQuery.value = ticker
+  discoverSuggestions.value = []
+  try {
+    const { data } = await axios.get(`/api/market/asset/${ticker}`)
+    discoverDetail.value = data
+  } catch {
+    discoverDetail.value = null
+  }
 }
 </script>
 
@@ -156,53 +166,6 @@ function fmtDate(iso: string): string {
           </span>
         </div>
 
-        <div class="kpi-card accent-green">
-          <span class="kpi-icon">📅</span>
-          <span class="kpi-label">Renda mensal projetada</span>
-          <span class="kpi-value positive">R$ {{ fmt(kpis.monthly_income) }}</span>
-          <span class="kpi-sub">R$ {{ fmt(kpis.annual_income) }} / ano</span>
-        </div>
-
-        <div class="kpi-card">
-          <span class="kpi-icon">%</span>
-          <span class="kpi-label">DY médio ponderado</span>
-          <span class="kpi-value">{{ kpis.avg_dy != null ? fmt(kpis.avg_dy) + '%' : '—' }}</span>
-          <span class="kpi-sub">{{ kpis.upcoming_count }} ex-dates nos próx. 30d</span>
-        </div>
-      </div>
-
-      <!-- Próximos proventos ───────────────────────────────────────────── -->
-      <div class="section-block">
-        <div class="section-title-row">
-          <h3 class="section-title">Próximos Ex-Dividendos</h3>
-          <router-link to="/calendario" class="btn-link-sm">Ver calendário →</router-link>
-        </div>
-
-        <div v-if="upcoming.length === 0" class="empty-inline">
-          Nenhum ex-date nos próximos 30 dias.
-        </div>
-
-        <div v-else class="upcoming-list">
-          <div
-            v-for="ev in upcoming"
-            :key="ev.ticker + ev.ex_date"
-            class="upcoming-item"
-            :class="urgencyClass(ev.days_until_ex)"
-          >
-            <div class="upcoming-identity">
-              <span class="upcoming-ticker">{{ ev.ticker }}</span>
-              <span class="upcoming-name">{{ ev.asset_name }}</span>
-            </div>
-            <div class="upcoming-info">
-              <span class="upcoming-date">{{ fmtDate(ev.ex_date) }}</span>
-              <span class="upcoming-value">R$ {{ fmt(ev.value, 4) }}/cota</span>
-            </div>
-            <div class="upcoming-countdown" :class="urgencyClass(ev.days_until_ex)">
-              <span class="days-num">{{ ev.days_until_ex }}</span>
-              <span class="days-label">dias</span>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- Atalhos rápidos ──────────────────────────────────────────────── -->
@@ -215,16 +178,72 @@ function fmtDate(iso: string): string {
           <span class="shortcut-icon">🔔</span>
           <span class="shortcut-label">Configurar Alertas</span>
         </router-link>
-        <router-link to="/relatorios" class="shortcut-card">
-          <span class="shortcut-icon">📊</span>
-          <span class="shortcut-label">Ver Relatórios Completos</span>
-        </router-link>
-        <router-link to="/calendario" class="shortcut-card">
-          <span class="shortcut-icon">🗓️</span>
-          <span class="shortcut-label">Calendário de Proventos</span>
+        <router-link to="/carteiras" class="shortcut-card">
+          <span class="shortcut-icon">💼</span>
+          <span class="shortcut-label">Gerenciar Carteiras</span>
         </router-link>
       </div>
     </template>
+
+    <!-- ── Descobrir ──────────────────────────────────────────────────────── -->
+    <div class="section-block discover-section">
+      <h3 class="section-title">Descobrir Ativos</h3>
+      <div class="discover-search-wrap">
+        <input
+          v-model="discoverQuery"
+          type="text"
+          class="discover-input"
+          placeholder="Buscar por ticker ou nome (ex: PETR4, Petrobras)"
+          autocomplete="off"
+          @input="onDiscoverInput"
+        />
+        <div v-if="discoverSuggestions.length > 0" class="suggestions-list">
+          <div
+            v-for="s in discoverSuggestions"
+            :key="s.ticker"
+            class="suggestion-item"
+            @click="loadAssetDetail(s.ticker)"
+          >
+            <span class="sug-ticker">{{ s.ticker }}</span>
+            <span class="sug-name">{{ s.name }}</span>
+            <span v-if="s.price" class="sug-price">R$ {{ fmt(s.price) }}</span>
+          </div>
+        </div>
+        <div v-if="discoverLoading" class="search-hint">Buscando...</div>
+      </div>
+
+      <!-- Detalhe do ativo ────────────────────────────────────────────────── -->
+      <div v-if="discoverDetail" class="asset-detail-card">
+        <div class="asset-detail-header">
+          <div>
+            <span class="asset-detail-ticker">{{ discoverDetail.ticker }}</span>
+            <span class="asset-detail-name">{{ discoverDetail.name }}</span>
+            <span v-if="discoverDetail.sector" class="asset-detail-sector">{{ discoverDetail.sector }}</span>
+          </div>
+          <div class="asset-detail-price-block">
+            <span class="asset-detail-price">{{ discoverDetail.price != null ? 'R$ ' + fmt(discoverDetail.price) : '—' }}</span>
+            <span v-if="discoverDetail.change_percent != null" :class="discoverDetail.change_percent >= 0 ? 'positive' : 'negative'">
+              {{ discoverDetail.change_percent >= 0 ? '+' : '' }}{{ fmt(discoverDetail.change_percent) }}%
+            </span>
+          </div>
+        </div>
+
+        <div v-if="discoverDetail.positions.length > 0" class="asset-detail-positions">
+          <p class="positions-label">Você já possui este ativo:</p>
+          <div v-for="p in discoverDetail.positions" :key="p.portfolio_id" class="position-row">
+            <span class="pos-portfolio">{{ p.portfolio_name }}</span>
+            <span class="pos-qty">{{ p.quantity }} cotas</span>
+            <span class="pos-avg">PM R$ {{ fmt(p.avg_price) }}</span>
+            <span v-if="p.return_pct != null" :class="p.return_pct >= 0 ? 'positive' : 'negative'">
+              {{ p.return_pct >= 0 ? '+' : '' }}{{ fmt(p.return_pct) }}%
+            </span>
+          </div>
+        </div>
+        <p v-else class="no-position-hint">Você ainda não possui este ativo em nenhuma carteira.</p>
+
+        <router-link to="/carteiras" class="btn-link-sm">Ir para Carteiras → Registrar Transação</router-link>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -401,4 +420,101 @@ function fmtDate(iso: string): string {
 
 .shortcut-icon { font-size: 1.4rem; flex-shrink: 0; }
 .shortcut-label { font-size: 0.85rem; color: #cbd5e1; font-weight: 500; }
+
+/* ── Descobrir ──────────────────────────────────────────────────────────── */
+
+.discover-section { margin-top: 32px; }
+
+.discover-search-wrap { position: relative; margin-bottom: 16px; }
+
+.discover-input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e5eefc;
+  font-size: 0.95rem;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.discover-input:focus { border-color: #3b82f6; }
+
+.suggestions-list {
+  position: absolute;
+  z-index: 100;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.suggestion-item:hover { background: rgba(59, 130, 246, 0.1); }
+
+.sug-ticker { font-weight: 700; color: #93c5fd; min-width: 70px; }
+.sug-name { flex: 1; font-size: 0.85rem; color: #94a3b8; }
+.sug-price { font-size: 0.85rem; color: #e5eefc; }
+.search-hint { font-size: 0.8rem; color: #64748b; padding: 6px 0; }
+
+.asset-detail-card {
+  background: rgba(15, 23, 42, 0.74);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 16px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.asset-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.asset-detail-ticker { display: block; font-size: 1.3rem; font-weight: 800; color: #93c5fd; }
+.asset-detail-name { display: block; font-size: 0.9rem; color: #e5eefc; }
+.asset-detail-sector { display: block; font-size: 0.78rem; color: #64748b; margin-top: 2px; }
+
+.asset-detail-price-block { text-align: right; }
+.asset-detail-price { display: block; font-size: 1.5rem; font-weight: 700; color: #e5eefc; }
+
+.asset-detail-positions { display: flex; flex-direction: column; gap: 8px; }
+.positions-label { font-size: 0.8rem; color: #64748b; margin: 0 0 4px; }
+
+.position-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.06);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.pos-portfolio { font-weight: 600; color: #cbd5e1; flex: 1; }
+.pos-qty, .pos-avg { color: #94a3b8; }
+
+.no-position-hint { font-size: 0.82rem; color: #64748b; margin: 0; }
+.positive { color: #86efac; }
+.negative { color: #fca5a5; }
 </style>

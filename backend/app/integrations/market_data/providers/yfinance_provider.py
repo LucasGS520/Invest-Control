@@ -7,10 +7,10 @@ from decimal import Decimal
 
 import yfinance as yf
 
-from app.integrations.market_data.base import BasePriceProvider, Quote
+from app.integrations.market_data.base import AssetInfo, BaseAssetInfoProvider, BasePriceProvider, Quote
 
 
-class YFinanceProvider(BasePriceProvider):
+class YFinanceProvider(BasePriceProvider, BaseAssetInfoProvider):
     """Executa chamadas sync do yfinance em thread separada."""
 
     provider_name = "yfinance"
@@ -65,6 +65,19 @@ class YFinanceProvider(BasePriceProvider):
             except Exception:
                 data[ticker] = {}
         return data
+
+    async def get_asset_info(self, ticker: str) -> AssetInfo:
+        ticker = ticker.upper()
+        data = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
+        name = data.get("longName") or data.get("shortName") or ticker
+        asset_type = "FII" if ticker.endswith("11") else "ACAO"
+        return AssetInfo(
+            ticker=ticker,
+            name=name,
+            sector=data.get("sector"),
+            asset_type=asset_type,
+            source=self.provider_name,
+        )
 
     def _build_quote(self, ticker: str, data: dict) -> Quote:
         price = data.get("lastPrice") or data.get("regularMarketPrice") or data.get("previousClose")

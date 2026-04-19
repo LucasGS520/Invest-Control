@@ -29,13 +29,7 @@ function logout() {
           <router-link to="/carteiras" active-class="active">Carteiras</router-link>
         </li>
         <li>
-          <router-link to="/calendario" active-class="active">Calendário</router-link>
-        </li>
-        <li>
           <router-link to="/alertas" active-class="active">Alertas</router-link>
-        </li>
-        <li>
-          <router-link to="/relatorios" active-class="active">Relatórios</router-link>
         </li>
       </ul>
       <button class="logout-btn" @click="logout">Sair</button>

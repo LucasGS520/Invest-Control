@@ -8,10 +8,11 @@ from pydantic import BaseModel, Field
 
 
 class TransactionCreate(BaseModel):
-    asset_id: int
+    ticker: str = Field(..., min_length=4, max_length=20, pattern=r"^[A-Z0-9]+$")
     transaction_type: Literal["BUY", "SELL"]
     quantity: int = Field(..., gt=0)
     price: Decimal = Field(..., gt=0, decimal_places=4)
+    fees: Decimal | None = Field(None, ge=0, decimal_places=4)
     date: date
     notes: str | None = None
 
@@ -24,6 +25,7 @@ class TransactionOut(BaseModel):
     transaction_type: str
     quantity: int
     price: Decimal
+    fees: Decimal | None
     date: date
     notes: str | None
     created_at: datetime
